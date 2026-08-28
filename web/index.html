@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spab — whitespace watermark visualizer</title>
+<script src="https://cdn.jsdelivr.net/npm/bitwrench/dist/bitwrench.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#1c2530; --muted:#6b7684;
+    --line:#e3e7ec; --accent:#336699; --accent2:#cc6633;
+    --v0:#9aa4b0; --v1:#4a86c8; --v2:#3fa564; --v3:#d98a3d;
+    --ok:#2e9e5b; --warn:#c98a1a; --bad:#cc4433;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12161b; --panel:#1a2028; --ink:#e6ebf1; --muted:#93a0ae; --line:#2a323c; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 20px 64px}
+  h1{font-size:22px;margin:0 0 2px}
+  .sub{color:var(--muted);margin:0 0 20px;font-size:13px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:0 0 16px}
+  .card h2{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px}
+  textarea,input[type=text]{width:100%;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px}
+  textarea{min-height:110px;resize:vertical}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+  .row > div{flex:1;min-width:180px}
+  .btn{font:inherit;font-weight:600;cursor:pointer;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:8px;padding:9px 16px}
+  .btn.secondary{background:transparent;color:var(--accent)}
+  .btn:active{transform:translateY(1px)}
+  .metric{display:inline-block;margin:0 18px 6px 0;font-size:13px}
+  .metric b{font-size:16px;display:block}
+  .markerview{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:2.1;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
+  .slot{display:inline-block;width:14px;height:15px;line-height:15px;text-align:center;border-radius:3px;color:#fff;font-size:10px;vertical-align:middle;margin:0 1px}
+  .v0{background:var(--v0)} .v1{background:var(--v1)} .v2{background:var(--v2)} .v3{background:var(--v3)}
+  .legend span{display:inline-block;margin-right:14px;font-size:12px;color:var(--muted)}
+  .swatch{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:middle;margin-right:4px}
+  .hist{display:flex;gap:8px;align-items:flex-end;height:90px;margin-top:6px}
+  .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
+  .bar .b{width:100%;border-radius:4px 4px 0 0;min-height:2px}
+  .bar small{font-size:11px;color:var(--muted)}
+  .slider{display:flex;align-items:center;gap:10px;margin:6px 0}
+  .slider label{margin:0;min-width:150px;color:var(--ink)}
+  .slider input{flex:1}
+  .slider output{min-width:44px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+  .status{font-weight:700;padding:2px 10px;border-radius:20px;font-size:12px;color:#fff;display:inline-block}
+  .s-perfect{background:var(--ok)} .s-corrected{background:var(--warn)} .s-failed,.s-not-detected{background:var(--bad)}
+  .issues{color:var(--warn);font-size:12px;margin-top:8px}
+  .muted{color:var(--muted);font-size:12px}
+  code{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>spab · whitespace watermark visualizer</h1>
+  <p class="sub">Baseline scheme — 2 bits per inter-word space, 4 whitespace variants, repetition + majority-vote ECC, CRC frame. A sandbox for iterating on the encoder/decoder.</p>
+
+  <div class="card">
+    <h2>1 · Encode</h2>
+    <div style="margin-bottom:12px">
+      <label for="cover">Cover text</label>
+      <textarea id="cover"></textarea>
+    </div>
+    <div class="row">
+      <div>
+        <label for="msg">Message / payload</label>
+        <input id="msg" type="text" value="spab-2026">
+      </div>
+      <div style="flex:0 0 auto">
+        <button class="btn" id="encodeBtn">Encode ▶</button>
+      </div>
+    </div>
+    <div id="encMeta" style="margin-top:14px"></div>
+    <div id="encIssues" class="issues"></div>
+  </div>
+
+  <div class="card" id="wmCard" style="display:none">
+    <h2>2 · Watermarked text</h2>
+    <p class="muted">Looks identical to the original when copied. Each colored cell is one slot carrying 2 bits (its variant index).</p>
+    <div class="legend" style="margin:8px 0">
+      <span><i class="swatch v0"></i>0 · space</span>
+      <span><i class="swatch v1"></i>1 · six-per-em</span>
+      <span><i class="swatch v2"></i>2 · thin</span>
+      <span><i class="swatch v3"></i>3 · hair</span>
+    </div>
+    <div class="markerview" id="markerView"></div>
+    <h2 style="margin-top:16px">Carrier histogram</h2>
+    <div class="hist" id="histEnc"></div>
+  </div>
+
+  <div class="card" id="corruptCard" style="display:none">
+    <h2>3 · Corruption channel</h2>
+    <p class="muted">Attack the watermarked text before decoding, then see what survives.</p>
+    <div class="slider"><label>Normalize spaces →U+0020</label><input type="range" id="cNorm" min="0" max="100" value="0"><output id="cNormV">0%</output></div>
+    <div class="slider"><label>Delete words (desync)</label><input type="range" id="cDel" min="0" max="60" value="0"><output id="cDelV">0%</output></div>
+    <div class="slider"><label>Insert words (desync)</label><input type="range" id="cIns" min="0" max="60" value="0"><output id="cInsV">0%</output></div>
+    <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn secondary" id="stripBtn">Full strip (normalize all)</button>
+      <button class="btn secondary" id="resetBtn">Reset channel</button>
+    </div>
+  </div>
+
+  <div class="card" id="decCard" style="display:none">
+    <h2>4 · Decode</h2>
+    <div id="decOut"></div>
+    <h2 style="margin-top:16px">Carrier histogram (after corruption)</h2>
+    <div class="hist" id="histCor"></div>
+  </div>
+</div>
+
+<script src="spab.js"></script>
+<script>
+(function(){
+  "use strict";
+  try { if (window.bw && bw.loadStyles) bw.loadStyles({ primary:'#336699', secondary:'#cc6633' }); } catch(e){}
+
+  var VCOLORS = ['v0','v1','v2','v3'];
+  var SAMPLE = "The quick brown fox jumps over the lazy dog while a curious cat and an old owl quietly watch the bright autumn morning unfold across the wide green valley below the distant snowy mountains under a pale blue sky. Rivers wind slowly toward the calm and shining sea near the small fishing village where people gather every evening to share stories, laughter, and warm bread baked fresh in stone ovens that have stood for many quiet generations.";
+
+  var $ = function(id){ return document.getElementById(id); };
+  var state = { watermarked:null, message:null };
+
+  $('cover').value = SAMPLE;
+
+  function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // Render text with slots shown as colored cells.
+  function markerHTML(text){
+    var slots = SPAB.getSlots(text);
+    var slotSet = {}; slots.forEach(function(i){ slotSet[i]=true; });
+    var map = {}; SPAB.SPACE_MAP.forEach(function(c,i){ map[c]=i; });
+    var out = '';
+    for (var i=0;i<text.length;i++){
+      var ch = text[i];
+      if (slotSet[i]){
+        var v = map[ch]; if (v===undefined) v=0;
+        out += '<span class="slot '+VCOLORS[v]+'">'+v+'</span>';
+      } else if (ch==='\n'){ out += '<br>'; }
+      else { out += esc(ch); }
+    }
+    return out;
+  }
+
+  function renderHist(el, text){
+    var h = SPAB.histogram(text);
+    var max = Math.max(1, Math.max.apply(null, h.counts));
+    var html = '';
+    for (var v=0; v<4; v++){
+      var pct = Math.round(100 * h.counts[v] / max);
+      html += '<div class="bar"><div class="b '+VCOLORS[v]+'" style="height:'+pct+'%"></div>'
+            + '<small>'+v+'</small><small>'+h.counts[v]+'</small></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function metricHTML(label, val){ return '<span class="metric">'+label+'<b>'+val+'</b></span>'; }
+
+  function doEncode(){
+    var cover = $('cover').value;
+    var msg = $('msg').value;
+    var res = SPAB.encode(cover, msg, {});
+    state.watermarked = res.text;
+    state.message = msg;
+    var m = res.metadata;
+    $('encMeta').innerHTML =
+      metricHTML('Slots', m.slots) +
+      metricHTML('Capacity (bits)', m.capacityBits) +
+      metricHTML('Frame (bits)', m.frameBits) +
+      metricHTML('Copies', m.reps) +
+      metricHTML('Payload (bytes)', m.payloadBytes);
+    $('encIssues').innerHTML = (m.issues && m.issues.length) ? m.issues.map(esc).join('<br>') : '';
+
+    $('wmCard').style.display = '';
+    $('corruptCard').style.display = '';
+    $('decCard').style.display = '';
+    $('markerView').innerHTML = markerHTML(state.watermarked);
+    renderHist($('histEnc'), state.watermarked);
+    resetChannel();
+    runChannel();
+  }
+
+  // --- corruption channel ---
+  function corruptNormalize(text, p){
+    if (p<=0) return text;
+    return text.split('').map(function(ch){
+      var c = ch.charCodeAt(0);
+      if ((c===0x2006||c===0x2009||c===0x200A) && Math.random()<p) return ' ';
+      return ch;
+    }).join('');
+  }
+  function deleteWords(text, p){
+    if (p<=0) return text;
+    var parts = text.split(/(\s+)/); // [word, sep, word, sep, ...]
+    var out = [];
+    for (var i=0;i<parts.length;i+=2){
+      if (Math.random()>=p) { out.push(parts[i]); if (parts[i+1]!==undefined) out.push(parts[i+1]); }
+    }
+    return out.join('');
+  }
+  var FILLER = ['and','the','a','then','soon','very','quite','often','here','there','maybe','also'];
+  function insertWords(text, p){
+    if (p<=0) return text;
+    var parts = text.split(/(\s+)/);
+    var out = [];
+    for (var i=0;i<parts.length;i+=2){
+      out.push(parts[i]);
+      var sep = parts[i+1];
+      if (sep!==undefined){
+        out.push(sep);
+        if (Math.random()<p){ out.push(FILLER[(Math.random()*FILLER.length)|0]); out.push(' '); }
+      }
+    }
+    return out.join('');
+  }
+
+  function currentChannel(){
+    var t = state.watermarked || '';
+    t = corruptNormalize(t, (+$('cNorm').value)/100);
+    t = deleteWords(t, (+$('cDel').value)/100);
+    t = insertWords(t, (+$('cIns').value)/100);
+    return t;
+  }
+
+  function runChannel(){
+    if (!state.watermarked) return;
+    var t = currentChannel();
+    renderHist($('histCor'), t);
+    var d = SPAB.decode(t, {});
+    var m = d.metadata;
+    var cls = 's-' + m.status;
+    var match = (d.message!==null && d.message===state.message);
+    var html = '<div style="margin-bottom:10px"><span class="status '+cls+'">'+m.status.toUpperCase()+'</span></div>';
+    html += metricHTML('Recovered', d.message===null ? '—' : ('“'+esc(d.message)+'”'));
+    html += metricHTML('Exact match', match ? '✓ yes' : '✗ no');
+    html += metricHTML('Confidence', Math.round((m.confidence||0)*100)+'%');
+    if (m.agreement!==undefined) html += metricHTML('Bit agreement', Math.round(m.agreement*100)+'%');
+    if (m.reps!==undefined) html += metricHTML('Copies read', m.reps);
+    if (m.rawMessage && !match) html += metricHTML('Best-effort', '“'+esc(String(m.rawMessage).slice(0,32))+'”');
+    $('decOut').innerHTML = html;
+  }
+
+  function resetChannel(){
+    $('cNorm').value=0; $('cDel').value=0; $('cIns').value=0;
+    syncOutputs();
+  }
+  function syncOutputs(){
+    $('cNormV').textContent = $('cNorm').value+'%';
+    $('cDelV').textContent  = $('cDel').value+'%';
+    $('cInsV').textContent  = $('cIns').value+'%';
+  }
+
+  $('encodeBtn').addEventListener('click', doEncode);
+  ['cNorm','cDel','cIns'].forEach(function(id){
+    $(id).addEventListener('input', function(){ syncOutputs(); runChannel(); });
+  });
+  $('stripBtn').addEventListener('click', function(){ $('cNorm').value=100; syncOutputs(); runChannel(); });
+  $('resetBtn').addEventListener('click', function(){ resetChannel(); runChannel(); });
+
+  // encode once on load
+  doEncode();
+})();
+</script>
+</body>
+</html>

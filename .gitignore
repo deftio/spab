@@ -1,0 +1,10 @@
+# Derived SQLite index — rebuilt from JSONL logs via `node bench/db.js import`.
+bench/runs/*.sqlite
+bench/runs/*.sqlite-journal
+bench/runs/*.sqlite-wal
+
+# Ad-hoc CSV exports (regenerable). JSONL run logs ARE tracked (source of truth).
+bench/*.csv
+bench/gen-results.csv
+
+node_modules/
