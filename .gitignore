@@ -1,10 +1,19 @@
-# Derived SQLite index — rebuilt from JSONL logs via `node bench/db.js import`.
-bench/runs/*.sqlite
-bench/runs/*.sqlite-journal
-bench/runs/*.sqlite-wal
+# Derived SQLite index — rebuilt from JSONL logs via `node r_and_d/db.js import`.
+r_and_d/reports/*.sqlite
+r_and_d/reports/*.sqlite-journal
+r_and_d/reports/*.sqlite-wal
 
-# Ad-hoc CSV exports (regenerable). JSONL run logs ARE tracked (source of truth).
-bench/*.csv
-bench/gen-results.csv
+# Ad-hoc CSV exports (regenerable). JSONL run logs in r_and_d/reports ARE tracked.
+r_and_d/reports/*.csv
 
+# Materialized/curated corpora — large and regenerable (corpus-gen / corpus-curate).
+# Commit a specific curated corpus deliberately if you want it versioned.
+corpuses/
+
+# Build outputs and deps
 node_modules/
+target/
+build/
+dist/
+__pycache__/
+*.pyc

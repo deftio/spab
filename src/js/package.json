@@ -1,0 +1,18 @@
+{
+  "name": "@deftio/spab",
+  "version": "0.4.0",
+  "description": "Robust text watermarking / steganography — hide an arbitrary payload in the whitespace and punctuation of text, protected by ECC. Zero dependencies.",
+  "type": "commonjs",
+  "main": "spab.js",
+  "browser": "spab.js",
+  "bin": { "spab": "cli.js" },
+  "files": ["spab.js", "cli.js", "README.md"],
+  "keywords": ["watermark", "steganography", "text", "whitespace", "ecc", "no-deps"],
+  "author": "M. A. Chatterjee (deftio)",
+  "license": "BSD-2-Clause",
+  "dependencies": {},
+  "engines": { "node": ">=14" },
+  "scripts": {
+    "test": "node ../../tests/roundtrip.test.js"
+  }
+}

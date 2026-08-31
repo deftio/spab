@@ -1,0 +1,15 @@
+# spab — Rust port (skeleton; not yet implemented).
+# Dependency-free by design: [dependencies] stays empty.
+[package]
+name = "spab"
+version = "0.1.0"
+edition = "2021"
+description = "Robust text watermarking / steganography — no dependencies."
+license = "BSD-2-Clause"
+authors = ["M. A. Chatterjee (deftio)"]
+
+[lib]
+name = "spab"
+path = "src/lib.rs"
+
+[dependencies]

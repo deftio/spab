@@ -1,0 +1,16 @@
+// spab — Java/Kotlin port (skeleton; not yet implemented). No dependencies.
+plugins {
+    id 'java-library'
+}
+
+group = 'com.deftio.spab'
+version = '0.1.0'
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(17) }
+}
+
+repositories { mavenCentral() }
+
+// No third-party dependencies by design.
+dependencies { }

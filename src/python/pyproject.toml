@@ -1,0 +1,16 @@
+# spab — Python port (skeleton; not yet implemented). Pure Python, no dependencies.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spab"
+version = "0.1.0"
+description = "Robust text watermarking / steganography — no dependencies."
+authors = [{ name = "M. A. Chatterjee (deftio)" }]
+license = { text = "BSD-2-Clause" }
+requires-python = ">=3.8"
+dependencies = []
+
+[tool.setuptools]
+packages = ["spab"]

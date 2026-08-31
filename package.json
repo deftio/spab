@@ -1,0 +1,16 @@
+{
+  "name": "spab-workspace",
+  "private": true,
+  "version": "0.4.0",
+  "description": "spab — robust text watermarking. Monorepo root (reference JS lib in src/js, research in r_and_d).",
+  "license": "BSD-2-Clause",
+  "author": "M. A. Chatterjee (deftio)",
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {
+    "test": "node tests/roundtrip.test.js",
+    "bench": "node r_and_d/harness.js --gen 2000",
+    "survival": "node r_and_d/symbol-survival.js --gen 3000",
+    "ci": "node tests/roundtrip.test.js && node r_and_d/harness.js --gen 500 --no-log && node r_and_d/symbol-survival.js --gen 500"
+  }
+}
