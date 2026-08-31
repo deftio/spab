@@ -8,9 +8,15 @@
   "dependencies": {},
   "devDependencies": {},
   "scripts": {
-    "test": "node tests/roundtrip.test.js",
+    "lint": "node tests/lint.js",
+    "test": "node tests/roundtrip.test.js && node tests/branches.test.js",
+    "fuzz": "node tests/fuzz.test.js",
+    "coverage": "node tests/coverage.js",
+    "coverage:strict": "node tests/coverage.js --strict",
     "bench": "node r_and_d/harness.js --gen 2000",
     "survival": "node r_and_d/symbol-survival.js --gen 3000",
-    "ci": "node tests/roundtrip.test.js && node r_and_d/harness.js --gen 500 --no-log && node r_and_d/symbol-survival.js --gen 500"
-  }
+    "ci": "node tests/lint.js && node tests/roundtrip.test.js && node tests/branches.test.js && node r_and_d/harness.js --gen 500 --no-log && node r_and_d/symbol-survival.js --gen 500",
+    "gui": "npx --yes --package bitwrench@2 bwcli serve . --port 1948"
+  },
+  "//port": "1948 — the year Claude Shannon published 'A Mathematical Theory of Communication' (spab's entropy north star). Chosen to avoid the crowded 3000/8000/8080."
 }

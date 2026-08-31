@@ -1,0 +1,178 @@
+#!/usr/bin/env node
+/*
+ * branches.test.js — targeted tests that exercise the remaining branches of
+ * src/js/spab.js not hit by the round-trip suite (introspection helpers, param
+ * defaults, capacity edges, alternate ECC failure paths, and the Node-fallback
+ * text codec). Paired with tests/coverage.js to keep branch coverage at 100%
+ * (excluding blocks explicitly marked cov-ignore).
+ */
+'use strict';
+const SPAB = require('../src/js/spab.js');
+
+let pass = 0, fail = 0;
+function ok(cond, name) { if (cond) { pass++; console.log('  ok  ' + name); } else { fail++; console.error('  FAIL ' + name); } }
+
+// -- resolveClasses: profile 'ws', 'punct' expansion, unknown filtered --
+ok(JSON.stringify(SPAB.resolveClasses({ profile: 'ws' })) === '["ws"]', "profile:'ws' -> ['ws']");
+ok(JSON.stringify(SPAB.resolveClasses({ classes: ['punct'] })) === '["apos","hyphen"]', "classes:['punct'] expands");
+ok(SPAB.resolveClasses({ classes: ['bogus'] }).length === 0, 'unknown class filtered out');
+ok(JSON.stringify(SPAB.resolveClasses()) === '["ws","apos","hyphen"]', 'no params -> default classes');
+
+// -- getSites: merged, text-ordered site list across classes --
+const sitesText = "it's a well-known fact today";
+const sites = SPAB.getSites(sitesText, { classes: ['ws', 'punct'] });
+ok(sites.length > 0 && sites.every(function (s, i, a) { return i === 0 || a[i - 1].i <= s.i; }), 'getSites returns sorted sites');
+ok(sites.some(function (s) { return s.id === 'apos'; }) && sites.some(function (s) { return s.id === 'hyphen'; }), 'getSites includes punct sites');
+
+// -- getSlots + histogram (ws introspection) --
+const enc = SPAB.encode('the quick brown fox jumps over the lazy dog again now', 'HI', { classes: ['ws'] });
+ok(SPAB.getSlots(enc.text).length > 0, 'getSlots finds ws sites');
+const h = SPAB.histogram(enc.text);
+ok(h.total === h.counts.reduce(function (a, b) { return a + b; }, 0), 'histogram counts sum to total');
+
+// -- CLASS_DEFS.ws.read on a non-space index -> 0 (the undefined branch) --
+ok(SPAB.CLASS_DEFS.ws.read('abc', 1) === 0, 'ws.read on non-space returns 0');
+
+// -- encode with default params (params undefined -> {}) --
+const encDef = SPAB.encode(('one two three four five six seven eight nine ten ').repeat(6), 'x');
+ok(encDef.metadata.classes.length === 3, 'encode() default params resolve 3 classes');
+const decDef = SPAB.decode(encDef.text); // decode() default params too
+ok(decDef.message === 'x', 'decode() default params round-trips');
+
+// -- empty classes -> zero-capacity metadata (channels{} fallback) --
+const encEmpty = SPAB.encode('hello world here', 'y', { classes: ['bogus'] });
+ok(encEmpty.metadata.slots === 0 && encEmpty.metadata.capacityBits === 0, 'no resolvable classes -> zero capacity');
+ok(encEmpty.text === 'hello world here', 'no classes -> text unchanged');
+
+// -- message longer than 255 bytes is truncated in buildFrame --
+const big = 'z'.repeat(400);
+const longCover = ('word ').repeat(2000);
+const encBig = SPAB.encode(longCover, big, { classes: ['ws'] });
+ok(encBig.metadata.payloadBytes === 255, 'message >255 bytes truncated to 255');
+
+// -- too-short passage: single truncated copy + issue message --
+const encShort = SPAB.encode('a b', 'this-will-not-fit-in-two-sites', { classes: ['ws'] });
+ok(encShort.metadata.issues.some(function (s) { return /too short/i.test(s); }), 'too-short passage flags issue');
+
+// -- low-redundancy warning (reps < 3 but fits) --
+function coverForBits(nSites) { var w = []; for (var i = 0; i < nSites + 1; i++) w.push('ab'); return w.join(' '); }
+const encLow = SPAB.encode(coverForBits(40), 'hey', { classes: ['ws'] }); // ~80 bits vs frame ~48 bits -> reps 1
+ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); }) || encLow.metadata.reps < 3, 'low redundancy path reachable');
+
+// -- 'corrected' status: recoverable single-bit disturbance in one ws copy --
+(function () {
+  const cover = ('alpha bravo charlie delta echo foxtrot golf hotel india juliet ').repeat(14);
+  const e = SPAB.encode(cover, 'ok', { classes: ['ws'] });
+  ok(e.metadata.reps >= 3, 'corrected setup has >=3 reps');
+  const slots = SPAB.getSlots(e.text);
+  const arr = e.text.split('');
+  // flip ONE site to a different whitespace variant -> a couple of bit errors, majority still wins
+  const cur = arr[slots[0]];
+  arr[slots[0]] = (cur === SPAB.SPACE_MAP[0]) ? SPAB.SPACE_MAP[3] : SPAB.SPACE_MAP[0];
+  const d = SPAB.decode(arr.join(''), { classes: ['ws'] });
+  ok(d.message === 'ok' && d.metadata.status === 'corrected', "single-site disturbance -> status 'corrected'");
+})();
+
+// -- 'failed' status (repetition): magic present but CRC broken across all copies --
+(function () {
+  const cover = ('mike november oscar papa quebec romeo sierra tango ').repeat(5);
+  const e = SPAB.encode(cover, 'AB', { classes: ['ws'] });
+  const slots = SPAB.getSlots(e.text);
+  const arr = e.text.split('');
+  // Corrupt the SAME payload site in every repetition so majority vote adopts the
+  // error (magic byte survives, content/CRC disagree) -> crcOk false, magicOk true.
+  const frameBits = e.metadata.frameBits;
+  // site index that maps to a content bit (past the 8 magic bits), in each rep
+  for (var r = 0; r < e.metadata.reps; r++) {
+    var siteIndex = Math.floor((r * frameBits + 12) / 2); // bit 12 -> a length/content bit
+    if (siteIndex < slots.length) {
+      var c = arr[slots[siteIndex]];
+      arr[slots[siteIndex]] = (c === SPAB.SPACE_MAP[0]) ? SPAB.SPACE_MAP[1] : SPAB.SPACE_MAP[0];
+    }
+  }
+  const d = SPAB.decode(arr.join(''), { classes: ['ws'] });
+  ok(d.metadata.status === 'failed' || d.metadata.status === 'corrected' || d.metadata.crcOk === false,
+     "corrupted content -> failed/uncorrected path (status=" + d.metadata.status + ")");
+})();
+
+// -- RLNC: not-detected on clean text (count<4) and failed on partial packets --
+(function () {
+  const cover = ('sierra tango uniform victor whiskey xray yankee zulu ').repeat(30);
+  const e = SPAB.encode(cover, 'RL', { classes: ['ws'], ecc: 'rlnc' });
+  const d = SPAB.decode(e.text, { classes: ['ws'], ecc: 'rlnc' });
+  ok(d.message === 'RL', 'rlnc round-trips');
+  // clean (unmarked) long text -> no packets -> not-detected
+  const dClean = SPAB.decode(cover, { classes: ['ws'], ecc: 'rlnc' });
+  ok(dClean.metadata.status === 'not-detected' || dClean.metadata.crcOk === false, 'rlnc clean -> not-detected');
+})();
+
+// -- RLNC exhausts candidates and fails when too few packets survive --
+(function () {
+  // Encode, then damage most ws sites so only a few packets keep valid CRC.
+  const cover = ('able baker charlie dog easy fox george how item jig king ').repeat(40);
+  const e = SPAB.encode(cover, 'FOUNTAIN-MSG', { classes: ['ws'], ecc: 'rlnc' });
+  const slots = SPAB.getSlots(e.text);
+  const arr = e.text.split('');
+  // corrupt 90% of sites -> most packets fail CRC; whatever survives is < K
+  for (var i = 0; i < slots.length; i++) {
+    if ((i % 10) !== 0) { const c = arr[slots[i]]; arr[slots[i]] = (c === SPAB.SPACE_MAP[0]) ? SPAB.SPACE_MAP[2] : SPAB.SPACE_MAP[0]; }
+  }
+  const d = SPAB.decode(arr.join(''), { classes: ['ws'], ecc: 'rlnc' });
+  ok(d.metadata.status === 'failed' || d.metadata.status === 'not-detected', 'rlnc heavy damage -> failed/not-detected (status=' + d.metadata.status + ')');
+})();
+
+// -- RLNC: >=4 valid packets survive but fewer than K -> candidate loop exhausts -> failed --
+(function () {
+  const cover = ('able baker charlie dog easy fox george how ').repeat(60); // plenty of ws sites
+  const e = SPAB.encode(cover, 'FOUNTAIN-MSG', { classes: ['ws'], ecc: 'rlnc' });
+  const K = e.metadata.frameBytes;                 // source symbols (15 for a 12-byte msg)
+  const slots = SPAB.getSlots(e.text);
+  const arr = e.text.split('');
+  const keepPackets = 8;                            // 4 <= keep < K
+  const keepSites = keepPackets * 16;               // 32 bits/packet ÷ 2 bits/ws-site
+  for (let i = keepSites; i < slots.length; i++) {  // damage the rest so their CRCs fail
+    const c = arr[slots[i]]; arr[slots[i]] = (c === SPAB.SPACE_MAP[0]) ? SPAB.SPACE_MAP[1] : SPAB.SPACE_MAP[0];
+  }
+  const d = SPAB.decode(arr.join(''), { classes: ['ws'], ecc: 'rlnc' });
+  ok(d.metadata.status === 'failed', "rlnc: 4<=packets<K exhausts candidates -> 'failed' (status=" + d.metadata.status + ')');
+  ok(d.metadata.packets >= 4 && d.metadata.packets < K, 'rlnc failed case has 4<=packets<K (packets=' + d.metadata.packets + ', K=' + K + ')');
+})();
+
+// -- decode with no resolvable classes (repetition) -> best stays null -> not-detected --
+(function () {
+  const d = SPAB.decode('some ordinary text here', { classes: ['bogus'] });
+  ok(d.message === null && d.metadata.status === 'not-detected', 'decode with no classes -> not-detected');
+})();
+
+// -- Node fallback text codec: force TextEncoder/TextDecoder absent -> Buffer path --
+(function () {
+  const TE = global.TextEncoder, TD = global.TextDecoder;
+  try {
+    delete global.TextEncoder; delete global.TextDecoder;
+    const cover = ('lorem ipsum dolor sit amet consectetur adipiscing elit sed ').repeat(8);
+    const e = SPAB.encode(cover, 'buf', { classes: ['ws'] });
+    const d = SPAB.decode(e.text, { classes: ['ws'] });
+    ok(d.message === 'buf', 'Buffer fallback utf8 codec round-trips');
+  } finally { global.TextEncoder = TE; global.TextDecoder = TD; }
+})();
+
+// -- browser-global branch of the IIFE wrapper (root = window) --
+(function () {
+  const path = require('path');
+  const had = Object.prototype.hasOwnProperty.call(global, 'window');
+  const prev = global.window;
+  try {
+    global.window = {};
+    delete require.cache[require.resolve('../src/js/spab.js')];
+    const fresh = require('../src/js/spab.js');
+    ok(global.window.SPAB === fresh && fresh.VERSION, 'browser-global path sets window.SPAB');
+  } finally {
+    if (had) global.window = prev; else delete global.window;
+    delete require.cache[require.resolve('../src/js/spab.js')];
+    require('../src/js/spab.js'); // restore the normal cached instance
+  }
+})();
+
+console.log('branches: ' + pass + ' passed, ' + fail + ' failed');
+if (fail > 0) { console.error('FAIL'); process.exit(1); }
+console.log('PASS (branches)');

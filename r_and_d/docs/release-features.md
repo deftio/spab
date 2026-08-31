@@ -14,6 +14,16 @@ vectors so implementations interoperate bit-for-bit.
 - [ ] **C / C++** — small C core with a clean header; the likely performance/embeddable base.
 - [ ] **Python** — pure-Python package (no C-extension required), no deps.
 - [ ] **Java / Kotlin** — JVM library (Kotlin Multiplatform is an option), no deps.
+- [ ] **Swift** — SwiftPM package, no deps (Apple platforms + Linux via Swift toolchain).
+
+**Build/test strategy — one Docker toolchain image (planned, when ports start).** Rather than
+install every toolchain everywhere, provide a single `Dockerfile` (a dev container) with Node,
+Rust, C/C++ (gcc/clang + CMake), Python, Java/Kotlin (JDK + Gradle), and Swift. All ports build and run
+their conformance vectors inside it — reproducible locally and in CI, no "works on my machine."
+Notes: pair it with a `.devcontainer/` for editor use; the fat image (~2–3 GB) is ideal for the
+*cross-language conformance* job (build all ports, run shared vectors in one place), while
+per-language CI jobs can still use lighter official images for speed. The no-deps invariant is
+about the *library*, not the build image — the image only supplies compilers. Default dev port: 1948.
 
 Cross-cutting requirements for every port:
 

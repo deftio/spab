@@ -1,0 +1,21 @@
+# Dependabot — deliberately minimal.
+#
+# The spab LIBRARY has ZERO runtime and dev dependencies (see the no-deps invariant),
+# so there is no npm ecosystem to watch. The only thing that drifts is the pinned
+# versions of GitHub Actions in .github/workflows, so we watch just that.
+#
+# Cadence: Dependabot's least-frequent native interval is "monthly" (it has no
+# "quarterly"). We use monthly and group everything into one PR to keep the noise near
+# quarterly in practice — review/merge a couple times a year.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "ci"

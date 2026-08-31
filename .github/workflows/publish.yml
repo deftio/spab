@@ -1,0 +1,81 @@
+name: Publish
+
+# Package publishing — INERT until credentials are added.
+#
+# Triggered when a GitHub Release is published (see release.yml, which the tag push
+# creates). Each ecosystem job runs a credential-free packaging check (proof the
+# package is publishable) and performs a REAL publish only when its token secret is
+# present. No secrets configured yet ⇒ these jobs package-check and stop, never fail.
+#
+# To go live later, add repo secrets:
+#   NPM_TOKEN   — npm automation token for @deftio/spab
+#   PYPI_TOKEN  — PyPI API token for the spab project
+# (and, when the ports are implemented, equivalents for crates.io / Maven Central).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}   # allow manual dry-runs from the Actions tab
+
+jobs:
+  npm:
+    name: npm (@deftio/spab)
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}   # hoisted so the `if:` guards can read it
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Always: prove the package builds and would publish cleanly (no token needed).
+      - name: Pack check (dry run)
+        working-directory: src/js
+        run: |
+          npm pack --dry-run
+          echo "packaged @deftio/spab ok (dry run)"
+
+      # Only when a token exists: the real publish. Skipped silently otherwise.
+      - name: Publish to npm
+        if: ${{ env.NPM_TOKEN != '' }}
+        working-directory: src/js
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+      - name: Note (no token)
+        if: ${{ env.NPM_TOKEN == '' }}
+        run: echo "NPM_TOKEN not set — dry run only. Add the secret to enable publishing."
+
+  pypi:
+    name: PyPI (spab)
+    runs-on: ubuntu-latest
+    env:
+      PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Package-check only while the Python port is a skeleton; guarded so it can't
+      # fail the release. Becomes a real build+publish once src/python is implemented.
+      - name: Build check
+        continue-on-error: true
+        working-directory: src/python
+        run: |
+          python -m pip install --upgrade build >/dev/null
+          python -m build || echo "python port not buildable yet (skeleton) — skipping"
+
+      - name: Publish to PyPI
+        if: ${{ env.PYPI_TOKEN != '' }}
+        working-directory: src/python
+        run: |
+          python -m pip install --upgrade twine >/dev/null
+          twine upload -u __token__ -p "$PYPI_TOKEN" dist/* || echo "nothing to upload yet"
+
+      - name: Note (no token)
+        if: ${{ env.PYPI_TOKEN == '' }}
+        run: echo "PYPI_TOKEN not set — no publish. Add the secret once the Python port is ready."

@@ -24,17 +24,33 @@ jobs:
       - name: Syntax check
         run: |
           for f in src/js/spab.js src/js/cli.js cli/spabdemo.js tests/roundtrip.test.js \
+                   tests/branches.test.js tests/fuzz.test.js tests/coverage.js tests/lint.js \
                    r_and_d/harness.js r_and_d/corruptions.js r_and_d/corpus-gen.js \
                    r_and_d/corpus-fs.js r_and_d/payloads.js r_and_d/provenance.js \
                    r_and_d/symbol-survival.js r_and_d/db.js; do
             node --check "$f"
           done
+      - name: Lint (warnings are errors)
+        run: node tests/lint.js
       - name: Conformance tests
         run: node tests/roundtrip.test.js
+      - name: Branch tests
+        run: node tests/branches.test.js
       - name: Harness smoke
         run: node r_and_d/harness.js --gen 500 --no-log
       - name: Symbol-survival smoke
         run: node r_and_d/symbol-survival.js --gen 500
+
+      # --- hygiene, MEASURED but NOT gating yet (flip to blocking later) ---
+      # Fuzzing and 100% branch coverage are enforced by intent, not by CI failure,
+      # until they've proven stable across the matrix. Remove continue-on-error (and
+      # use `npm run coverage:strict`) to make them required.
+      - name: Fuzz (report only)
+        continue-on-error: true
+        run: node tests/fuzz.test.js --iterations 3000
+      - name: Coverage (report only)
+        continue-on-error: true
+        run: node tests/coverage.js
 
   version-consistency:
     name: version consistency

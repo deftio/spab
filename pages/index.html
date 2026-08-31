@@ -3,257 +3,350 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>spab · playground</title>
-<style>
-  :root{
-    --bg:#f6f7f9; --panel:#fff; --ink:#18202b; --muted:#6b7684; --line:#e4e8ee;
-    --accent:#3b6ea5; --accent2:#c9633b; --ok:#2e9e5b; --warn:#c98a1a; --bad:#cc4433;
-    --v0:#9aa4b0; --v1:#4a86c8; --v2:#3fa564; --v3:#d98a3d; --chip:#eef2f7;
-    --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 16px rgba(20,30,45,.05);
-  }
-  @media (prefers-color-scheme: dark){
-    :root{ --bg:#0f141a; --panel:#171e26; --ink:#e7edf3; --muted:#93a0ae; --line:#28313c;
-           --accent:#6aa6e0; --chip:#1e2731; --shadow:0 1px 2px rgba(0,0,0,.3); }
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  .wrap{max-width:1080px;margin:0 auto;padding:26px 20px 80px}
-  header h1{font-size:26px;margin:0;letter-spacing:-.01em}
-  header h1 b{color:var(--accent)}
-  header p{color:var(--muted);margin:4px 0 22px;font-size:14px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  @media (max-width:860px){.grid{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-        box-shadow:var(--shadow);padding:18px 18px 16px;margin-bottom:16px}
-  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 14px}
-  label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
-  textarea,input[type=text],select{width:100%;font:inherit;color:inherit;background:var(--bg);
-        border:1px solid var(--line);border-radius:9px;padding:10px 11px}
-  textarea{min-height:130px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.7}
-  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:12px}
-  .row>div{flex:1;min-width:150px}
-  .btn{font:inherit;font-weight:600;cursor:pointer;border:1px solid var(--accent);
-       background:var(--accent);color:#fff;border-radius:9px;padding:10px 18px}
-  .btn:active{transform:translateY(1px)}
-  .btn.ghost{background:transparent;color:var(--accent)}
-  .toggles{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
-  .toggles label{display:inline-flex;align-items:center;gap:6px;color:var(--ink);font-size:13px;margin:0;cursor:pointer}
-  .metrics{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
-  .metric{background:var(--chip);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--muted)}
-  .metric b{color:var(--ink);font-weight:600}
-  .markerview{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:2;
-       background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:12px;
-       white-space:pre-wrap;word-break:break-word;max-height:230px;overflow:auto}
-  .slot{display:inline-block;min-width:13px;height:15px;line-height:15px;text-align:center;border-radius:3px;
-        color:#fff;font-size:10px;vertical-align:middle;margin:0 1px}
-  .v0{background:var(--v0)}.v1{background:var(--v1)}.v2{background:var(--v2)}.v3{background:var(--v3)}
-  .pmark{background:var(--accent2);color:#fff;border-radius:3px;padding:0 2px}
-  .legend{font-size:12px;color:var(--muted);margin:8px 0 0}
-  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:middle;margin:0 4px 0 10px}
-  .attacks{display:flex;flex-wrap:wrap;gap:8px}
-  .chip{border:1px solid var(--line);background:var(--panel);border-radius:20px;padding:6px 13px;font-size:13px;
-        cursor:pointer;user-select:none;color:var(--ink)}
-  .chip.on{background:var(--accent2);border-color:var(--accent2);color:#fff}
-  .slider{display:flex;align-items:center;gap:10px;margin:10px 0 0}
-  .slider label{margin:0;min-width:140px;color:var(--ink)}
-  .slider input{flex:1}.slider output{min-width:42px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
-  .result{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  .pill{font-weight:700;padding:4px 14px;border-radius:20px;font-size:13px;color:#fff}
-  .s-perfect{background:var(--ok)}.s-corrected{background:var(--warn)}
-  .s-failed,.s-not-detected{background:var(--bad)}
-  .msg{font-family:ui-monospace,Menlo,monospace;font-size:16px;background:var(--bg);
-       border:1px solid var(--line);border-radius:8px;padding:6px 12px}
-  .muted{color:var(--muted);font-size:12px}
-  .foot{color:var(--muted);font-size:12px;margin-top:22px;text-align:center}
-</style>
+<title>spab — robust text watermarking</title>
+<script src="https://cdn.jsdelivr.net/npm/bitwrench@2/dist/bitwrench.umd.min.js"></script>
+<script src="../src/js/spab.js"></script>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1><b>spab</b> · playground</h1>
-    <p>Hide a message in the whitespace and punctuation of text, then attack it and watch it survive.
-       Runs the real library (<code>src/js/spab.js</code>) in your browser.</p>
-  </header>
-
-  <div class="grid">
-    <div class="card">
-      <h2>1 · Encode</h2>
-      <label for="cover">Cover text</label>
-      <textarea id="cover"></textarea>
-      <div class="row">
-        <div><label for="msg">Message</label><input id="msg" type="text" value="spab-2026"></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button class="btn" id="encodeBtn">Encode ▶</button></div>
-      </div>
-      <div class="row" style="margin-top:14px">
-        <div>
-          <label>Carrier classes</label>
-          <div class="toggles">
-            <label><input type="checkbox" id="cls-ws" checked> whitespace</label>
-            <label><input type="checkbox" id="cls-apos" checked> apostrophe</label>
-            <label><input type="checkbox" id="cls-hyphen" checked> hyphen</label>
-          </div>
-        </div>
-        <div style="flex:0 0 auto">
-          <label for="ecc">ECC</label>
-          <select id="ecc"><option value="repetition">repetition</option><option value="rlnc">RLNC fountain</option></select>
-        </div>
-      </div>
-      <div class="metrics" id="encMeta" style="margin-top:14px"></div>
-      <div class="muted" id="encIssues" style="margin-top:8px;color:var(--warn)"></div>
-    </div>
-
-    <div class="card">
-      <h2>2 · Watermarked text</h2>
-      <p class="muted">Looks identical when read normally. Toggle to reveal the carriers.</p>
-      <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">
-        <input type="checkbox" id="showCarriers" checked> show carriers
-      </label>
-      <div class="markerview" id="markerView" style="margin-top:8px"></div>
-      <div class="legend">
-        <i class="v0"></i>0 <i class="v1"></i>1 <i class="v2"></i>2 <i class="v3"></i>3 (space variant)
-        <span class="pmark" style="margin-left:10px">A</span> punctuation carrier
-      </div>
-      <div style="margin-top:10px"><button class="btn ghost" id="copyBtn">Copy watermarked text</button></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>3 · Channel attacks</h2>
-    <p class="muted">Applied to the watermarked text before decoding. Click to toggle; sliders set intensity.</p>
-    <div class="attacks" id="attackChips"></div>
-    <div id="sliders"></div>
-  </div>
-
-  <div class="card">
-    <h2>4 · Decode</h2>
-    <div class="result" id="decResult"></div>
-  </div>
-
-  <div class="foot">spab — robust text watermarking · BSD-2-Clause · this page runs the reference library locally</div>
-</div>
-
-<script src="../src/js/spab.js"></script>
+<div id="app"></div>
 <script>
-(function(){
+(function () {
   "use strict";
-  var $=function(id){return document.getElementById(id);};
-  var VCOLOR=['v0','v1','v2','v3'];
-  var SAMPLE="It's a well-known, old-fashioned truth that the co-operative fox-trot isn't easily "+
-    "forgotten. \"Keep the spacing,\" she said, \"and the punctuation too.\" The long-standing "+
-    "custom — quietly kept — travels wherever the text is copied, from letter to letter and "+
-    "line to line, through many a re-reading and quiet afternoon. ".repeat(3);
-  var WSV=[0x2006,0x2009,0x200A];
-  var state={wm:null,params:null};
-  $('cover').value=SAMPLE;
 
-  function classes(){
-    var c=[]; if($('cls-ws').checked)c.push('ws'); if($('cls-apos').checked)c.push('apos'); if($('cls-hyphen').checked)c.push('hyphen');
-    return c.length?c:['ws'];
+  var styles = bw.loadStyles({ primary: '#3b6ea5', secondary: '#c9633b', radius: 'lg', elevation: 'sm', spacing: 'normal' });
+  var p = styles.palette, L = styles.layout;
+
+  // ---- site styling (wide container + hero + prose + carrier viz) ----
+  bw.injectCSS(bw.css({
+    'body': { background: p.background || '#fff', color: p.dark.base, margin: '0' },
+    '.wrap': { maxWidth: '1180px', margin: '0 auto', padding: '0 28px' },
+    '.nav': { borderBottom: '1px solid ' + p.light.border, background: p.surface, position: 'sticky', top: '0', zIndex: '10' },
+    '.nav .wrap': { display: 'flex', alignItems: 'center', gap: '8px', height: '58px' },
+    '.brand': { fontWeight: '800', fontSize: '20px', color: p.primary.base, textDecoration: 'none', marginRight: 'auto', letterSpacing: '-.01em' },
+    '.navlink': { color: p.dark.base, textDecoration: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '14px' },
+    '.navlink:hover': { background: p.primary.light },
+    '.navlink.active': { color: p.primary.base, fontWeight: '700' },
+    '.hero': { background: 'linear-gradient(135deg,' + p.primary.base + ',' + p.secondary.base + ')', color: '#fff', padding: '64px 0 56px' },
+    '.hero h1': { fontSize: '44px', margin: '0 0 10px', letterSpacing: '-.02em', lineHeight: '1.05' },
+    '.hero p': { fontSize: '19px', opacity: '.94', maxWidth: '660px', margin: '0 0 24px' },
+    '.hero .btns a': { display: 'inline-block', textDecoration: 'none', padding: '12px 22px', borderRadius: '10px', fontWeight: '700', marginRight: '12px' },
+    '.btn-solid': { background: '#fff', color: p.primary.base },
+    '.btn-ghost': { border: '1.5px solid rgba(255,255,255,.7)', color: '#fff' },
+    '.section': { padding: '44px 0' },
+    '.section h2': { fontSize: '27px', margin: '0 0 6px', letterSpacing: '-.01em' },
+    '.lede': { color: p.dark.base, opacity: '.72', fontSize: '17px', maxWidth: '720px', marginTop: '0' },
+    '.prose': { fontSize: '16px', lineHeight: '1.7', maxWidth: '760px' },
+    '.prose code': { background: p.surface, border: '1px solid ' + p.light.border, borderRadius: '5px', padding: '1px 6px', fontSize: '14px' },
+    '.grid3': { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '18px' },
+    '.grid2': { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px' },
+    '.intgrid': { display: 'grid', gridTemplateColumns: '260px 1fr', gap: '24px', alignItems: 'start' },
+    '@media (max-width: 820px)': { '.grid3': { gridTemplateColumns: '1fr' }, '.grid2': { gridTemplateColumns: '1fr' }, '.intgrid': { gridTemplateColumns: '1fr' }, '.hero h1': { fontSize: '34px' } },
+    'table.t': { width: '100%', borderCollapse: 'collapse', fontSize: '14px', margin: '10px 0' },
+    'table.t th, table.t td': { textAlign: 'left', padding: '8px 10px', borderBottom: '1px solid ' + p.light.border },
+    'table.t th': { color: p.dark.base, opacity: '.65', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '.04em' },
+    'pre.code': { background: p.dark.base, color: '#e7edf3', padding: '14px 16px', borderRadius: '10px', overflowX: 'auto', fontSize: '13px', lineHeight: '1.55' },
+    '.foot': { borderTop: '1px solid ' + p.light.border, color: p.dark.base, opacity: '.6', fontSize: '13px', padding: '26px 0', marginTop: '20px' },
+    // carrier visualization (test page)
+    '.spab-view': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: '13px', lineHeight: '2', background: p.surface, border: '1px solid ' + p.light.border, borderRadius: L.radius.card, padding: L.spacing.card, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '230px', overflow: 'auto' },
+    '.slot': { display: 'inline-block', minWidth: '13px', height: '15px', lineHeight: '15px', textAlign: 'center', borderRadius: '3px', color: '#fff', fontSize: '10px', verticalAlign: 'middle', margin: '0 1px' },
+    '.v0': { background: '#9aa4b0' }, '.v1': { background: '#4a86c8' }, '.v2': { background: '#3fa564' }, '.v3': { background: '#d98a3d' },
+    '.pmark': { background: p.secondary.base, color: '#fff', borderRadius: '3px', padding: '0 2px' },
+    '.metawrap': { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' },
+    '.chipwrap': { display: 'flex', flexWrap: 'wrap', gap: '8px' }
+  }));
+
+  // ================= shared helpers =================
+  function tt(headers, rows) {
+    return { t: 'table', a: { class: 't' }, c: [
+      { t: 'thead', c: { t: 'tr', c: headers.map(function (h) { return { t: 'th', c: h }; }) } },
+      { t: 'tbody', c: rows.map(function (r) { return { t: 'tr', c: r.map(function (cell) { return { t: 'td', c: cell }; }) }; }) }
+    ] };
   }
-  function params(){ return { classes:classes(), ecc:$('ecc').value }; }
-  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function badge(text, v) { return { t: 'span', a: { class: 'bw_badge ' + (v || '') }, c: text }; }
 
-  // ---- attacks (mirror r_and_d/corruptions.js) ----
-  function rand(){return Math.random();}
-  var A={
-    normalize:{label:'normalize .3',p:0.3,fn:function(t,p){return t.split('').map(function(ch){var c=ch.charCodeAt(0);return (WSV.indexOf(c)>=0&&rand()<p)?' ':ch;}).join('');}},
-    nfkc:{label:'NFKC',fn:function(t){return t.normalize('NFKC');}},
-    smartQuotes:{label:'smart-quotes',fn:function(t){return t.replace(/'/g,String.fromCharCode(0x2019));}},
-    saltPepper:{label:'salt&pepper .15',p:0.15,fn:function(t,p){var V=[0x20].concat(WSV);return t.split('').map(function(ch){var c=ch.charCodeAt(0);return (WSV.indexOf(c)>=0&&rand()<p)?String.fromCharCode(V[(rand()*4)|0]):ch;}).join('');}},
-    fullStrip:{label:'strip whitespace',fn:function(t){return t.replace(new RegExp('['+WSV.map(function(c){return '\\u'+c.toString(16).padStart(4,'0');}).join('')+']','g'),' ');}},
-    reflow:{label:'reflow',fn:function(t){return t.replace(/[\s   ]+/g,' ');}},
-    cutPaste:{label:'cut/paste .5',p:0.5,fn:function(t,p){var span=Math.floor(t.length*p);var st=Math.floor(rand()*Math.max(1,t.length-span));return t.slice(st,st+span);}},
-    truncate:{label:'truncate .5',p:0.5,fn:function(t,p){return t.slice(0,Math.max(1,Math.floor(t.length*p)));}},
-    wordDelete:{label:'word delete .1',p:0.1,fn:function(t,p){return t.split(/(\s+)/).filter(function(_,i){return i%2===1||rand()>=p;}).join('');}}
+  // ================= TEST PAGE (the playground) =================
+  var SAMPLE = "It's a well-known, old-fashioned truth that the co-operative fox-trot isn't easily forgotten. " +
+    "\"Keep the spacing,\" she said, \"and the punctuation too.\" The long-standing custom, quietly kept, " +
+    "travels wherever the text is copied, from letter to letter and line to line, through many a re-reading. ".repeat(3);
+  var WSV = [0x2006, 0x2009, 0x200A];
+  var st = { cover: SAMPLE, msg: 'spab-2026', cls: { ws: true, apos: true, hyphen: true }, ecc: 'repetition', showCarriers: true, wm: null, params: null, active: {} };
+  function R() { return Math.random(); }
+  var A = {
+    normalize:   { label: 'normalize', p: 0.3, fn: function (t, p) { return t.split('').map(function (ch) { var c = ch.charCodeAt(0); return (WSV.indexOf(c) >= 0 && R() < p) ? ' ' : ch; }).join(''); } },
+    nfkc:        { label: 'NFKC', fn: function (t) { return t.normalize('NFKC'); } },
+    smartQuotes: { label: 'smart-quotes', fn: function (t) { return t.replace(/'/g, String.fromCharCode(0x2019)); } },
+    saltPepper:  { label: 'salt & pepper', p: 0.15, fn: function (t, p) { var V = [0x20].concat(WSV); return t.split('').map(function (ch) { var c = ch.charCodeAt(0); return (WSV.indexOf(c) >= 0 && R() < p) ? String.fromCharCode(V[(R() * 4) | 0]) : ch; }).join(''); } },
+    fullStrip:   { label: 'strip whitespace', fn: function (t) { return t.replace(new RegExp('[' + WSV.map(function (c) { return '\\u' + c.toString(16).padStart(4, '0'); }).join('') + ']', 'g'), ' '); } },
+    cutPaste:    { label: 'cut / paste', p: 0.5, fn: function (t, p) { var span = Math.floor(t.length * p), s = Math.floor(R() * Math.max(1, t.length - span)); return t.slice(s, s + span); } },
+    truncate:    { label: 'truncate', p: 0.5, fn: function (t, p) { return t.slice(0, Math.max(1, Math.floor(t.length * p))); } },
+    wordDelete:  { label: 'word delete', p: 0.1, fn: function (t, p) { return t.split(/(\s+)/).filter(function (_, i) { return i % 2 === 1 || R() >= p; }).join(''); } }
   };
-  var active={};
-
-  function renderAttacks(){
-    var chips=$('attackChips'); chips.innerHTML='';
-    Object.keys(A).forEach(function(k){
-      var el=document.createElement('span'); el.className='chip'+(active[k]?' on':''); el.textContent=A[k].label;
-      el.onclick=function(){ active[k]=!active[k]; renderAttacks(); run(); };
-      chips.appendChild(el);
-    });
-    var sl=$('sliders'); sl.innerHTML='';
-    Object.keys(A).forEach(function(k){
-      if(A[k].p===undefined||!active[k])return;
-      var wrap=document.createElement('div'); wrap.className='slider';
-      wrap.innerHTML='<label>'+A[k].label.replace(/ [\d.]+$/,'')+'</label>'+
-        '<input type="range" min="0" max="100" value="'+Math.round(A[k].p*100)+'"><output>'+Math.round(A[k].p*100)+'%</output>';
-      var input=wrap.querySelector('input'),out=wrap.querySelector('output');
-      input.oninput=function(){ A[k].p=(+input.value)/100; out.textContent=input.value+'%'; run(); };
-      sl.appendChild(wrap);
-    });
-  }
-  function applyAttacks(text){
-    Object.keys(A).forEach(function(k){ if(active[k]) text=A[k].fn(text, A[k].p); });
-    return text;
-  }
-
-  // ---- carrier highlight ----
-  function markerHTML(text){
-    if(!$('showCarriers').checked) return esc(text);
-    var ids=SPAB.resolveClasses(state.params||{classes:classes()});
-    var mark={}; // index -> {type:'ws'|'p', val}
-    if(ids.indexOf('ws')>=0){ var map={}; SPAB.SPACE_MAP.forEach(function(c,i){map[c]=i;});
-      SPAB.getSlots(text).forEach(function(i){ var v=map[text[i]]; if(v!==undefined) mark[i]={t:'ws',v:v}; }); }
-    var punct=[]; if(ids.indexOf('apos')>=0)punct.push(0x27,0x2019); if(ids.indexOf('hyphen')>=0)punct.push(0x2d,0x2010);
-    for(var i=0;i<text.length;i++){ if(punct.indexOf(text.charCodeAt(i))>=0 && !mark[i]) mark[i]={t:'p'}; }
-    var out='';
-    for(i=0;i<text.length;i++){
-      if(mark[i]&&mark[i].t==='ws') out+='<span class="slot '+VCOLOR[mark[i].v]+'">'+mark[i].v+'</span>';
-      else if(mark[i]) out+='<span class="pmark">'+esc(text[i])+'</span>';
-      else if(text[i]==='\n') out+='<br>';
-      else out+=esc(text[i]);
+  function params() { var c = []; if (st.cls.ws) c.push('ws'); if (st.cls.apos) c.push('apos'); if (st.cls.hyphen) c.push('hyphen'); return { classes: c.length ? c : ['ws'], ecc: st.ecc }; }
+  function applyAttacks(text) { Object.keys(A).forEach(function (k) { if (st.active[k]) text = A[k].fn(text, A[k].p); }); return text; }
+  function statusVariant(s) { return s === 'perfect' ? 'bw_success' : s === 'corrected' ? 'bw_warning' : 'bw_danger'; }
+  function markerHTML(text) {
+    if (!st.showCarriers) return bw.escapeHTML(text);
+    var ids = SPAB.resolveClasses(params()), mark = {};
+    if (ids.indexOf('ws') >= 0) { var map = {}; SPAB.SPACE_MAP.forEach(function (c, i) { map[c] = i; }); SPAB.getSlots(text).forEach(function (i) { var v = map[text[i]]; if (v !== undefined) mark[i] = { t: 'ws', v: v }; }); }
+    var pc = []; if (ids.indexOf('apos') >= 0) pc.push(0x27, 0x2019); if (ids.indexOf('hyphen') >= 0) pc.push(0x2d, 0x2010);
+    for (var i = 0; i < text.length; i++) if (pc.indexOf(text.charCodeAt(i)) >= 0 && !mark[i]) mark[i] = { t: 'p' };
+    var out = '';
+    for (i = 0; i < text.length; i++) {
+      if (mark[i] && mark[i].t === 'ws') out += '<span class="slot v' + mark[i].v + '">' + mark[i].v + '</span>';
+      else if (mark[i]) out += '<span class="pmark">' + bw.escapeHTML(text[i]) + '</span>';
+      else if (text[i] === '\n') out += '<br>';
+      else out += bw.escapeHTML(text[i]);
     }
     return out;
   }
-
-  function metricHTML(label,val){return '<span class="metric">'+label+' <b>'+val+'</b></span>';}
-
-  function doEncode(){
-    var p=params();
-    var res=SPAB.encode($('cover').value, $('msg').value, p);
-    state.wm=res.text; state.params=p;
-    var m=res.metadata, chans=m.channels||{};
-    var chStr=Object.keys(chans).map(function(id){return id+':'+chans[id].sites;}).join(' ');
-    $('encMeta').innerHTML=
-      metricHTML('ecc',m.ecc)+metricHTML('classes',(m.classes||[]).join('+'))+
-      metricHTML('sites',chStr)+metricHTML(m.ecc==='rlnc'?'packets':'copies',m.reps)+
-      metricHTML('payload',m.payloadBytes+'B');
-    $('encIssues').textContent=(m.issues&&m.issues.length)?m.issues.join('  '):'';
-    render();
+  function updateMeta(md) {
+    var chans = md.channels || {}, chStr = Object.keys(chans).map(function (id) { return id + ':' + chans[id].sites; }).join(' ');
+    var items = [badge('ecc ' + md.ecc), badge('classes ' + (md.classes || []).join('+')), badge('sites ' + chStr), badge((md.ecc === 'rlnc' ? 'packets ' : 'copies ') + md.reps), badge('payload ' + md.payloadBytes + 'B')];
+    if (md.issues && md.issues.length) items.push(badge(md.issues.join(' '), 'bw_warning'));
+    bw.DOM('#encMeta', { t: 'div', a: { class: 'metawrap' }, c: items });
   }
-  function render(){
-    if(state.wm==null)return;
-    $('markerView').innerHTML=markerHTML(state.wm);
-    run();
+  function updateMarker() { bw.DOM('#markerView', { t: 'div', a: { class: 'spab-view' }, c: bw.raw(markerHTML(st.wm)) }); }
+  function runDecode() {
+    var d = SPAB.decode(applyAttacks(st.wm), st.params), md = d.metadata, match = d.message !== null && d.message === st.msg;
+    var items = [badge(md.status.toUpperCase(), statusVariant(md.status)),
+      { t: 'span', a: { class: 'bw_badge', style: bw.s({ fontFamily: 'ui-monospace,Menlo,monospace' }) }, c: d.message === null ? '—' : d.message },
+      badge('match ' + (match ? '✓' : '✗')), badge('confidence ' + Math.round((md.confidence || 0) * 100) + '%')];
+    if (md.channel) items.push(badge('via ' + md.channel));
+    if (md.packets !== undefined) items.push(badge('packets ' + md.packets));
+    bw.DOM('#decResult', { t: 'div', a: { class: 'metawrap' }, c: items });
   }
-  function run(){
-    if(state.wm==null)return;
-    var damaged=applyAttacks(state.wm);
-    var d=SPAB.decode(damaged, state.params);
-    var md=d.metadata, cls='s-'+md.status;
-    var match=(d.message!==null && d.message===$('msg').value);
-    var html='<span class="pill '+cls+'">'+md.status.toUpperCase()+'</span>';
-    html+='<span class="msg">'+(d.message===null?'—':esc(d.message))+'</span>';
-    html+=metricHTML('match', match?'✓ yes':'✗ no');
-    html+=metricHTML('confidence', Math.round((md.confidence||0)*100)+'%');
-    if(md.channel) html+=metricHTML('via', md.channel);
-    if(md.packets!==undefined) html+=metricHTML('packets', md.packets);
-    $('decResult').innerHTML=html;
+  function renderAttacks() {
+    bw.DOM('#attackRow', { t: 'div', a: { class: 'chipwrap' }, c: Object.keys(A).map(function (k) {
+      return bw.makeButton({ text: A[k].label, size: 'sm', variant: st.active[k] ? 'secondary' : 'light', onclick: function () { st.active[k] = !st.active[k]; renderAttacks(); renderSliders(); runDecode(); } });
+    }) });
+  }
+  function renderSliders() {
+    var rows = Object.keys(A).filter(function (k) { return A[k].p !== undefined && st.active[k]; }).map(function (k) {
+      return { t: 'div', a: { style: bw.s({ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }) }, c: [
+        { t: 'label', a: { style: bw.s({ minWidth: '130px', color: p.dark.base, fontSize: '13px' }) }, c: A[k].label },
+        { t: 'input', a: { type: 'range', min: '0', max: '100', value: String(Math.round(A[k].p * 100)), style: bw.s({ flex: '1' }), oninput: function (e) { A[k].p = (+e.target.value) / 100; runDecode(); } } }
+      ] };
+    });
+    bw.DOM('#sliderRow', { t: 'div', c: rows });
+  }
+  function doEncode() { st.params = params(); var res = SPAB.encode(st.cover, st.msg, st.params); st.wm = res.text; updateMeta(res.metadata); updateMarker(); runDecode(); }
+  function initTest() { renderAttacks(); doEncode(); }
+
+  function checkbox(label, checked, onchange) {
+    return { t: 'label', a: { style: bw.s({ display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '14px', cursor: 'pointer' }) }, c: [{ t: 'input', a: { type: 'checkbox', checked: checked, onchange: onchange } }, label] };
+  }
+  function field(label, control) { return { t: 'div', a: { style: bw.s({ marginBottom: '10px' }) }, c: [{ t: 'label', a: { style: bw.s({ fontSize: '12px', color: p.dark.base, opacity: '.65' }) }, c: label }, control] }; }
+
+  function testView() {
+    return { t: 'div', a: { class: 'wrap section', id: 'testroot' }, o: { mounted: function () { setTimeout(initTest, 0); } }, c: [
+      { t: 'h2', c: 'Live playground' },
+      { t: 'p', a: { class: 'lede' }, c: 'Encode a message, choose carriers and ECC, then attack the text and watch it decode. Runs the real library in your browser.' },
+      { t: 'div', a: { class: 'grid2', style: bw.s({ marginTop: '18px' }) }, c: [
+        bw.makeCard({ title: '1 · Encode', content: { t: 'div', c: [
+          field('Cover text', { t: 'textarea', a: { class: 'bw_form_control', rows: 6, oninput: function (e) { st.cover = e.target.value; } }, c: st.cover }),
+          field('Message', { t: 'input', a: { class: 'bw_form_control', type: 'text', value: st.msg, oninput: function (e) { st.msg = e.target.value; } } }),
+          { t: 'div', a: { style: bw.s({ display: 'flex', gap: '18px', flexWrap: 'wrap', alignItems: 'flex-end' }) }, c: [
+            field('Carrier classes', { t: 'div', c: [
+              checkbox('whitespace', st.cls.ws, function (e) { st.cls.ws = e.target.checked; doEncode(); }),
+              checkbox('apostrophe', st.cls.apos, function (e) { st.cls.apos = e.target.checked; doEncode(); }),
+              checkbox('hyphen', st.cls.hyphen, function (e) { st.cls.hyphen = e.target.checked; doEncode(); })
+            ] }),
+            field('ECC', { t: 'select', a: { class: 'bw_form_control', style: bw.s({ width: 'auto' }), onchange: function (e) { st.ecc = e.target.value; doEncode(); } }, c: [{ t: 'option', a: { value: 'repetition' }, c: 'repetition' }, { t: 'option', a: { value: 'rlnc' }, c: 'RLNC fountain' }] })
+          ] },
+          { t: 'div', a: { style: bw.s({ marginTop: '8px' }) }, c: bw.makeButton({ text: 'Encode ▶', variant: 'primary', onclick: doEncode }) },
+          { t: 'div', a: { id: 'encMeta', style: bw.s({ marginTop: '14px' }) } }
+        ] } }),
+        bw.makeCard({ title: '2 · Watermarked text', content: { t: 'div', c: [
+          checkbox('show carriers', st.showCarriers, function (e) { st.showCarriers = e.target.checked; updateMarker(); }),
+          { t: 'div', a: { id: 'markerView', style: bw.s({ marginTop: '8px' }) } },
+          { t: 'div', a: { style: bw.s({ marginTop: '10px' }) }, c: bw.makeButton({ text: 'Copy', variant: 'outline-secondary', size: 'sm', onclick: function () { if (st.wm && navigator.clipboard) navigator.clipboard.writeText(st.wm); } }) }
+        ] } })
+      ] },
+      bw.makeCard({ title: '3 · Channel attacks', content: { t: 'div', c: [
+        { t: 'p', a: { style: bw.s({ opacity: '.7', fontSize: '13px', marginTop: '0' }) }, c: 'Applied before decoding. Click to toggle; sliders set intensity.' },
+        { t: 'div', a: { id: 'attackRow' } }, { t: 'div', a: { id: 'sliderRow' } }
+      ] } }),
+      bw.makeCard({ title: '4 · Decode', content: { t: 'div', a: { id: 'decResult' } } })
+    ] };
   }
 
-  $('encodeBtn').onclick=doEncode;
-  $('showCarriers').onchange=function(){ if(state.wm!=null)$('markerView').innerHTML=markerHTML(state.wm); };
-  $('ecc').onchange=doEncode;
-  ['cls-ws','cls-apos','cls-hyphen'].forEach(function(id){$(id).onchange=doEncode;});
-  $('copyBtn').onclick=function(){ if(state.wm!=null){ navigator.clipboard&&navigator.clipboard.writeText(state.wm); $('copyBtn').textContent='Copied ✓'; setTimeout(function(){$('copyBtn').textContent='Copy watermarked text';},1200);} };
+  // ================= HOME =================
+  function feature(title, body) { return bw.makeCard({ title: title, content: { t: 'p', a: { class: 'prose', style: bw.s({ margin: '0' }) }, c: body } }); }
+  function homeView() {
+    return { t: 'div', c: [
+      { t: 'div', a: { class: 'hero' }, c: { t: 'div', a: { class: 'wrap' }, c: [
+        { t: 'h1', c: 'Hide a message in the whitespace of text.' },
+        { t: 'p', c: 'spab is a small, dependency-free library that embeds an arbitrary payload — a serial, a hash, JSON, even a tiny program — into the spaces and punctuation of ordinary text, protected by error correction so it survives copy/paste, reformatting, and normalization. The text reads identically; the signal lives in choices a reader never notices.' },
+        { t: 'div', a: { class: 'btns' }, c: [
+          { t: 'a', a: { href: '#/test', class: 'btn-solid' }, c: 'Try the live demo →' },
+          { t: 'a', a: { href: '#/how', class: 'btn-ghost' }, c: 'How it works' }
+        ] }
+      ] } },
+      { t: 'div', a: { class: 'wrap section' }, c: [
+        { t: 'div', a: { class: 'grid3' }, c: [
+          feature('Robust, not fragile', 'Multiple carrier channels + error correction. Whitespace and confusables fail on different edits, so the payload survives when one channel is wiped.'),
+          feature('Invisible where it counts', 'Renders identically in browsers, docs, chat, and PDFs. The mark is which space or which quote — not what the words say.'),
+          feature('Zero dependencies', 'A hand-rolled codec, GF(256) fountain, and framing — no third-party packages. One reference in JavaScript, more language ports on the way.')
+        ] },
+        { t: 'div', a: { style: bw.s({ marginTop: '34px' }) }, c: [
+          { t: 'h2', c: 'The idea in one line' },
+          { t: 'p', a: { class: 'prose' }, c: bw.raw('Text carries <b>spare entropy</b> — equivalent choices a reader won\'t notice (which space, which dash, straight vs. curly quote). spab measures that latent capacity, spends some on signal, and keeps enough margin (redundancy + ECC) to survive the channel. It\'s information-entropy management, applied to plain text.') },
+          { t: 'div', a: { style: bw.s({ marginTop: '16px' }) }, c: { t: 'a', a: { href: '#/test', class: 'navlink', style: bw.s({ background: p.primary.light, color: p.primary.base, fontWeight: '700', padding: '10px 16px' }) }, c: 'Open the interactive playground →' } }
+        ] }
+      ] }
+    ] };
+  }
 
-  renderAttacks();
-  doEncode();
+  // ================= HOW IT WORKS =================
+  function howView() {
+    return { t: 'div', a: { class: 'wrap section' }, c: [
+      { t: 'h2', c: 'How spab works' },
+      { t: 'p', a: { class: 'lede' }, c: 'A quick tour of the carriers, the parallel-channel design, error correction, and — honestly — the limits.' },
+
+      { t: 'h3', c: 'Carriers: whitespace + confusables' },
+      { t: 'p', a: { class: 'prose' }, c: bw.raw('spab writes bits by substituting characters that look the same but differ in code point. Two classes are on by default, chosen from measurement:') },
+      tt(['Carrier', 'Choice (bit 0 / 1)', 'Bits/site', 'Survives NFKC?'], [
+        ['whitespace', 'space / thin / hair / six-per-em', '2', bw.raw('<b style="color:#cc4433">no</b> — collapses to a plain space')],
+        ['apostrophe', bw.raw("straight <code>'</code> / curly <code>&#8217;</code>"), '1', bw.raw('<b style="color:#2e9e5b">yes</b>')],
+        ['hyphen', bw.raw('hyphen-minus / Unicode hyphen'), '1', bw.raw('<b style="color:#2e9e5b">yes</b>')]
+      ]),
+      { t: 'p', a: { class: 'prose' }, c: bw.raw('The key insight: <b>NFKC normalization</b> (common in databases, forms, and search) erases every whitespace variant, but the confusables survive it — while a "smart-quote" autocorrect erases the apostrophe channel but leaves whitespace. They fail on <i>different</i> channels.') },
+
+      { t: 'h3', c: 'Parallel channels' },
+      { t: 'p', a: { class: 'prose' }, c: 'Each carrier is an independent channel that carries the whole payload. Decode returns whichever channel survived — so an edit that kills one leaves the others intact:' },
+      tt(['Attack', 'whitespace-only', 'default (multi-carrier)'], [
+        ['clean', '✓', bw.raw('✓ <span style="opacity:.6">via whitespace</span>')],
+        ['NFKC normalize', bw.raw('<b style="color:#cc4433">FAIL</b>'), bw.raw('✓ <span style="opacity:.6">via apostrophe</span>')],
+        ['smart-quote autocorrect', '✓', bw.raw('✓ <span style="opacity:.6">via whitespace</span>')],
+        ['strip whitespace', bw.raw('<b style="color:#cc4433">FAIL</b>'), bw.raw('✓ <span style="opacity:.6">via apostrophe</span>')]
+      ]),
+
+      { t: 'h3', c: 'Error correction' },
+      { t: 'p', a: { class: 'prose' }, c: bw.raw('Two ECC modes. <b>Repetition</b> (default) writes the framed payload many times and majority-votes per bit — strong when a channel is dense. <b>RLNC fountain</b> (a from-scratch GF(256) random-linear code) breaks the payload into self-checking, self-locating packets that <i>pool across all channels</i>, so surviving carriers reconstruct the whole message. Both are dependency-free.') },
+
+      { t: 'h3', c: 'Capacity vs. robustness' },
+      { t: 'p', a: { class: 'prose' }, c: bw.raw('More redundancy = more survivable, less payload. A short passage holds a tiny serial ultra-redundantly; a long document holds a hash, JSON, or an easter-egg program. Match payload size to text length, then spend the rest on redundancy.') },
+
+      { t: 'h3', c: 'What it is not' },
+      { t: 'div', a: { style: bw.s({ maxWidth: '760px' }) }, c: bw.makeAlert ? bw.makeAlert({ variant: 'warning', content: bw.raw('spab targets <b>incidental</b> robustness — ordinary editing, copy/paste, reformatting. It does <b>not</b> defeat a determined stripper: anyone who knows the carrier set can remove it, and fully rewriting the text removes it entirely. The design raises that cost and makes stripping detectable, but never claims to be unbreakable.') }) : { t: 'p', a: { class: 'prose' }, c: 'spab targets incidental robustness, not defeat of a determined adversary.' } },
+
+      { t: 'div', a: { style: bw.s({ marginTop: '20px' }) }, c: { t: 'a', a: { href: '#/test', class: 'navlink', style: bw.s({ background: p.primary.light, color: p.primary.base, fontWeight: '700', padding: '10px 16px' }) }, c: 'See it live in the playground →' } }
+    ] };
+  }
+
+  // ================= LIBRARIES / INTEGRATION (long, anchored) =================
+  function goTo(id) { var el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  function langSection(id, name, status, statusVar, blurb, install, code, notes) {
+    return { t: 'section', a: { id: id, style: bw.s({ paddingTop: '18px', scrollMarginTop: '70px' }) }, c: [
+      { t: 'div', a: { style: bw.s({ display: 'flex', alignItems: 'center', gap: '12px' }) }, c: [
+        { t: 'h3', a: { style: bw.s({ margin: '0' }) }, c: name }, badge(status, statusVar) ] },
+      { t: 'p', a: { class: 'prose', style: bw.s({ marginTop: '6px' }) }, c: blurb },
+      install ? { t: 'div', c: [{ t: 'div', a: { style: bw.s({ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '.05em', opacity: '.6', margin: '10px 0 4px' }) }, c: 'Install' }, { t: 'pre', a: { class: 'code' }, c: install }] } : null,
+      { t: 'div', a: { style: bw.s({ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '.05em', opacity: '.6', margin: '12px 0 4px' }) }, c: 'Encode & decode' },
+      { t: 'pre', a: { class: 'code' }, c: code },
+      notes ? { t: 'p', a: { class: 'prose', style: bw.s({ fontSize: '14px', opacity: '.85' }) }, c: notes } : null
+    ] };
+  }
+  function librariesView() {
+    var toc = [['js', 'JavaScript', 'reference'], ['cli', 'Command line', 'ready'], ['rust', 'Rust', 'planned'],
+      ['c', 'C / C++', 'planned'], ['python', 'Python', 'planned'], ['java', 'Java / Kotlin', 'planned'], ['swift', 'Swift', 'planned']];
+    var tocCard = bw.makeCard({ title: 'On this page', content: { t: 'div', c: toc.map(function (t) {
+      return { t: 'a', a: { href: 'javascript:void 0', onclick: (function (id) { return function () { goTo(id); }; })(t[0]),
+        style: bw.s({ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '6px 0', textDecoration: 'none', color: p.dark.base, borderBottom: '1px solid ' + p.light.border }) },
+        c: [{ t: 'span', c: t[1] }, { t: 'span', a: { style: bw.s({ fontSize: '11px', opacity: '.55' }) }, c: t[2] }] };
+    }) } });
+
+    var JSPLANNED = 'Pre-release — the API below is the target across all ports; only the fields shown are stable in the JS reference today (key/compression are on the roadmap).';
+
+    return { t: 'div', a: { class: 'wrap section' }, c: [
+      { t: 'h2', c: 'Integrate spab' },
+      { t: 'p', a: { class: 'lede' }, c: 'One wire format, many languages. Every port exposes the same encode/decode surface and validates against shared conformance vectors, so a mark written by one reads in any other — bit for bit. All ports are dependency-free.' },
+
+      { t: 'div', a: { class: 'grid2', style: bw.s({ gridTemplateColumns: '260px 1fr', alignItems: 'start', marginTop: '18px' }) }, c: [
+        { t: 'div', a: { style: bw.s({ position: 'sticky', top: '74px' }) }, c: [ tocCard,
+          bw.makeCard({ title: 'The shared API', content: { t: 'div', a: { class: 'prose', style: bw.s({ fontSize: '14px' }) }, c: bw.raw(
+            'Same shape everywhere:<br><code>encode(baseText, message, key?, options?) → { text, meta }</code><br>' +
+            '<code>decode(markedText, key?, options?) → { message, meta }</code><br><br>' +
+            '<code>options.ecc</code> = <code>"repetition"</code> | <code>"rlnc"</code>; ' +
+            '<code>options.classes</code> = carrier set. Same input → same output on every platform.') } })
+        ] },
+
+        { t: 'div', c: [
+          langSection('js', 'JavaScript', 'reference · 0.4.0', 'bw_success',
+            bw.raw('The reference implementation. Runs in Node and the browser, zero dependencies. <i>Not yet on npm — use from source; <code>@deftio/spab</code> is coming.</i>'),
+            "# from source (today)\ncp path/to/spab/src/js/spab.js .\n\n# coming soon\nnpm i @deftio/spab",
+            "// Node / CommonJS\nconst SPAB = require('./spab.js');\n\nconst { text, metadata } = SPAB.encode('your cover text here', 'my-id', { ecc: 'rlnc' });\nconst { message }        = SPAB.decode(text, { ecc: 'rlnc' });\nconsole.log(message); // 'my-id'\n\n// Browser\n// <script src=\"spab.js\"><\/script>  →  window.SPAB.encode(...)",
+            bw.raw('Exports: <code>encode</code>, <code>decode</code>, <code>getSlots</code>, <code>histogram</code>, <code>VERSION</code>, <code>ALGORITHM</code>.')),
+
+          langSection('cli', 'Command line', 'ready', 'bw_success',
+            'A Node CLI wraps the library for quick use and scripting.',
+            "./cli/spabdemo.js help",
+            "./cli/spabdemo.js encode --message \"meet at dawn\" --in story.txt --out out.txt\n./cli/spabdemo.js decode --in out.txt\n./cli/spabdemo.js capacity --in story.txt\n\n# pipes work too\ncat story.txt | ./cli/spabdemo.js encode -m \"psst\" | ./cli/spabdemo.js decode",
+            null),
+
+          langSection('rust', 'Rust', 'planned', 'bw_light',
+            'A no-dependency crate (no_std-friendly where practical). API mirrors the reference.',
+            "# Cargo.toml (planned)\n[dependencies]\nspab = \"0.4\"",
+            "use spab::{encode, decode, Options};\n\nlet (text, _meta) = encode(cover, b\"my-id\", None, &Options { ecc: Ecc::Rlnc, ..Default::default() })?;\nlet (message, _)  = decode(&text, None, &Options { ecc: Ecc::Rlnc, ..Default::default() })?;",
+            bw.raw('Skeleton in <code>src/rust/</code> (Cargo). Not yet implemented.')),
+
+          langSection('c', 'C / C++', 'planned', 'bw_light',
+            'A small C core with a clean header (C++17-friendly). The likely embeddable/performance base for other bindings.',
+            "# CMake (planned)\nadd_subdirectory(spab/src/c_cpp)\ntarget_link_libraries(app PRIVATE spab)",
+            "#include \"spab.h\"\n\nchar *out = NULL; spab_meta meta;\nspab_encode(cover, (const uint8_t*)\"my-id\", 5, NULL, 0, &opts, &out, &meta);\n\nuint8_t *msg = NULL; size_t n = 0;\nspab_decode(out, NULL, 0, &opts, &msg, &n, &meta);",
+            bw.raw('Skeleton in <code>src/c_cpp/</code> (CMake + <code>include/spab.h</code>). Not yet implemented.')),
+
+          langSection('python', 'Python', 'planned', 'bw_light',
+            'A pure-Python package — no C extension, no dependencies.',
+            "# planned\npip install spab",
+            "import spab\n\ntext, meta = spab.encode(\"your cover text\", b\"my-id\", options={\"ecc\": \"rlnc\"})\nmessage, meta = spab.decode(text, options={\"ecc\": \"rlnc\"})\nprint(message)  # b'my-id'",
+            bw.raw('Skeleton in <code>src/python/</code> (pyproject). Not yet implemented.')),
+
+          langSection('java', 'Java / Kotlin', 'planned', 'bw_light',
+            'A JVM library, no dependencies (Kotlin Multiplatform is an option).',
+            "// Gradle (planned)\nimplementation(\"com.deftio:spab:0.4.0\")",
+            "import com.deftio.spab.Spab;\n\nvar enc = Spab.encode(cover, \"my-id\".getBytes(), null, opts);\nvar dec = Spab.decode(enc.text, null, opts);\nSystem.out.println(new String(dec.message));",
+            bw.raw('Skeleton in <code>src/java/</code> (Gradle). Not yet implemented.')),
+
+          langSection('swift', 'Swift', 'planned', 'bw_light',
+            'A SwiftPM package — Apple platforms and Linux, no dependencies.',
+            "// Package.swift (planned)\n.package(url: \"https://github.com/deftio/spab\", from: \"0.4.0\")",
+            "import spab\n\nlet (text, _) = try Spab.encode(cover, Array(\"my-id\".utf8), key: nil, options: opts)\nlet (message, _) = try Spab.decode(text, key: nil, options: opts)\nprint(String(decoding: message, as: UTF8.self))",
+            bw.raw('Skeleton in <code>src/swift/</code> (SwiftPM). Not yet implemented.')),
+
+          { t: 'div', a: { style: bw.s({ marginTop: '26px', paddingTop: '16px', borderTop: '1px solid ' + p.light.border }) }, c: [
+            { t: 'h3', c: 'Interoperability' },
+            { t: 'p', a: { class: 'prose' }, c: bw.raw('All ports implement one <b>frozen wire format</b> and are checked against the same conformance vectors, so text watermarked in Python decodes in Rust or the browser. Source & issues: <a href="https://github.com/deftio/spab">github.com/deftio/spab</a> · License: BSD-2-Clause.') }
+          ] }
+        ] }
+      ] }
+    ] };
+  }
+
+  // ================= shell + router =================
+  var NAV = [['#/', 'Home'], ['#/how', 'How it works'], ['#/test', 'Playground'], ['#/libraries', 'Libraries']];
+  function navbar(active) {
+    return { t: 'div', a: { class: 'nav' }, c: { t: 'div', a: { class: 'wrap' }, c: [
+      { t: 'a', a: { href: '#/', class: 'brand' }, c: 'spab' }
+    ].concat(NAV.map(function (n) { return { t: 'a', a: { href: n[0], class: 'navlink' + (('#' + active) === n[0] || (active === '/' && n[0] === '#/') ? ' active' : '') }, c: n[1] }; })) } };
+  }
+  function shell() {
+    bw.DOM('#app', { t: 'div', c: [
+      { t: 'div', a: { id: 'nav' } },
+      { t: 'div', a: { id: 'view' } },
+      { t: 'div', a: { class: 'foot' }, c: { t: 'div', a: { class: 'wrap' }, c: bw.raw('spab — robust text watermarking · zero dependencies · BSD-2-Clause · port <b>1948</b> (Shannon, 1948)') } }
+    ] });
+  }
+  function paint() {
+    var path = (location.hash || '#/').replace(/^#/, '') || '/';
+    bw.DOM('#nav', navbar(path));
+    var view = path === '/how' ? howView() : path === '/test' ? testView() : path === '/libraries' ? librariesView() : homeView();
+    bw.DOM('#view', view);
+    try { window.scrollTo(0, 0); } catch (e) {}
+  }
+  shell();
+  window.addEventListener('hashchange', paint);
+  paint();
 })();
 </script>
 </body>
