@@ -1,0 +1,28 @@
+name: Quarterly dependency review
+
+# spab has ZERO package dependencies, so Dependabot (whose minimum cadence is monthly)
+# is overkill and its floor can't express "quarterly". Instead, on the 1st of each
+# quarter this checks the pinned GitHub Actions against their latest releases and opens
+# a tracking issue ONLY if something is behind. Manual run available any time.
+
+on:
+  schedule:
+    - cron: '0 12 1 1,4,7,10 *'   # 12:00 UTC on Jan 1, Apr 1, Jul 1, Oct 1
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write                    # to open/update the tracking issue
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }   # global fetch available
+      - name: Check pinned action versions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node .github/scripts/check-action-versions.mjs

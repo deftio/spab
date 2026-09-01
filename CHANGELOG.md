@@ -29,8 +29,16 @@ are development milestones of the JavaScript reference implementation (`src/js/s
 
 ### Changed
 - CI runs fuzz + coverage as report-only steps (measure now, gate later); adds the branch-test suite
-  to the blocking run.
+  to the blocking run; adds the lint gate as the first blocking step.
 - Small behavior-preserving simplifications in `spab.js` (removed provably-dead capacity guards).
+- **Dependency review is now quarterly.** Replaced the Dependabot config (whose minimum cadence is
+  monthly) with `deps-quarterly.yml` + a zero-dep checker (`.github/scripts/check-action-versions.mjs`)
+  that runs on the 1st of each quarter, compares pinned GitHub Actions against their latest releases,
+  and opens a tracking issue only when something is behind. spab has zero package dependencies, so
+  action pins are the only thing that drifts.
+
+### Removed
+- `.github/dependabot.yml` (superseded by the quarterly workflow above).
 
 ## [0.4.0] — 2026-08
 

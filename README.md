@@ -72,7 +72,9 @@ tests, harness/symbol-survival smokes, and a version-consistency check (`spab.js
 `package.json`). Fuzzing and **100% branch coverage** (measured with V8's built-in coverage — no
 c8/istanbul) run as report-only steps today and become blocking once stable.
 Tag-driven releases and (inert-until-credentialed) npm/PyPI publishing live in `release.yml` /
-`publish.yml`; see [`RELEASING.md`](RELEASING.md). Research lives in `r_and_d/` and is not shipped.
+`publish.yml`; see [`RELEASING.md`](RELEASING.md). Dependency review is **quarterly** (spab has zero
+package deps): `deps-quarterly.yml` checks pinned GitHub Actions against their latest releases each
+quarter and files an issue only if something is behind. Research lives in `r_and_d/` and is not shipped.
 
 ### GUI playground (`pages/`)
 
