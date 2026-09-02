@@ -1,5 +1,12 @@
 # spab
 
+[![CI](https://github.com/deftio/spab/actions/workflows/ci.yml/badge.svg)](https://github.com/deftio/spab/actions/workflows/ci.yml)
+[![version](https://img.shields.io/github/package-json/v/deftio/spab?label=version)](https://github.com/deftio/spab/releases)
+[![npm](https://img.shields.io/npm/v/%40deftio%2Fspab?label=npm)](https://www.npmjs.com/package/@deftio/spab)
+[![branch coverage](https://img.shields.io/badge/branch%20coverage-100%25-brightgreen)](CONTRIBUTING.md#coverage--fuzzing)
+[![license](https://img.shields.io/badge/license-BSD--2--Clause-blue)](LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-deftio%2Fspab-181717?logo=github)](https://github.com/deftio/spab)
+
 **spab** hides an arbitrary payload (a magic word, an ID/hash, JSON, even a small program) in
 the *whitespace and punctuation choices* of ordinary text, protected by error correction so it
 survives normal editing — copy/paste, reformatting, excerpting. The text reads identically; the
@@ -94,11 +101,12 @@ directly in a browser.
 - `docs/capacity-vs-robustness.md` — choosing what to embed and how robustly.
 - `r_and_d/docs/encoder-decoder-proposal-v1.md` — the full architecture proposal.
 - `r_and_d/docs/symbol-catalog.md`, `spab-watermark-plan.md`, `glossary.md` — design notes.
+- `r_and_d/docs/prior-art-and-tradeoffs.md` — related tools (StegCloak, 330k, …), approach tradeoffs, and open-source vs. obscurity.
 
 ## Contributing & changes
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) (invariants, dev setup, PR guidance),
-[`RELEASING.md`](RELEASING.md) (tag-driven releases + branch protection), and
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) (invariants, dev setup, branching & merging etiquette),
+[`RELEASING.md`](RELEASING.md) (release-on-version-bump + branch protection), and
 [`CHANGELOG.md`](CHANGELOG.md) for the release history. spab has **zero runtime and dev
 dependencies**; tooling like bitwrench is fetched on demand via `npx`, never added to the dep list.
 

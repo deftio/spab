@@ -156,6 +156,86 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
   } finally { global.TextEncoder = TE; global.TextDecoder = TD; }
 })();
 
+// -- symbol modem: mixed-radix bits<->symbols round-trip, incl. non-power-of-2 radices --
+(function () {
+  const sym = SPAB.symbols;
+  function rt(radices) {
+    const cap = sym.capacity(radices);
+    const bits = []; for (let i = 0; i < cap; i++) bits.push(i * 2654435761 % 2 === 0 ? 0 : 1);
+    const digits = sym.toSymbols(bits, radices);
+    const inRange = digits.every(function (d, i) { return d >= 0 && d < radices[i]; });
+    const back = sym.toBits(digits, radices);
+    return inRange && back.length === bits.length && back.join('') === bits.join('');
+  }
+  ok(rt([4, 4, 4, 4, 4]), 'symbol modem round-trips power-of-2 radices');
+  ok(rt([3, 3, 3, 3, 3, 3, 3, 3]), 'symbol modem round-trips radix-3 (non-power-of-2)');
+  ok(rt([6, 5, 4, 3, 7, 2, 6, 5, 3]), 'symbol modem round-trips mixed non-power-of-2 radices');
+  // capacity recovers fractional bits: radix-3 beats the naive floor(log2)=1 bit/site
+  const capN = sym.capacity([3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+  ok(capN > 10, 'radix-3 capacity (' + capN + ' bits / 10 sites) exceeds naive 1 bit/site');
+  // long radix-3 stream still bounded/valid (blocking)
+  ok(rt(new Array(200).fill(3)), 'symbol modem round-trips a long radix-3 stream (blocked)');
+})();
+
+// -- keyed scramble (interleave + whitening): right key recovers, wrong/no key fail --
+(function () {
+  const cover = ('It\'s a well-known, old-fashioned truth that the co-operative fox isn\'t forgotten. ').repeat(30);
+  ['repetition', 'rlnc'].forEach(function (ecc) {
+    const e = SPAB.encode(cover, 'TOP-SECRET', { classes: ['ws'], ecc: ecc, key: 'hunter2' });
+    ok(SPAB.decode(e.text, { classes: ['ws'], ecc: ecc, key: 'hunter2' }).message === 'TOP-SECRET', 'keyed ' + ecc + ': right key recovers');
+    ok(SPAB.decode(e.text, { classes: ['ws'], ecc: ecc }).message === null, 'keyed ' + ecc + ': no key -> null');
+    ok(SPAB.decode(e.text, { classes: ['ws'], ecc: ecc, key: 'wrong' }).message === null, 'keyed ' + ecc + ': wrong key -> null');
+  });
+  // keyed insert carrier too
+  const ez = SPAB.encode(cover, 'ZW', { classes: ['zwsp'], key: 'k' });
+  ok(SPAB.decode(ez.text, { classes: ['zwsp'], key: 'k' }).message === 'ZW', 'keyed zwsp round-trips');
+  ok(SPAB.decode(ez.text, { classes: ['zwsp'], key: 'x' }).message === null, 'keyed zwsp wrong key -> null');
+})();
+
+// -- block-size knob: matching block round-trips; mismatched block fails --
+(function () {
+  const cover = ('the quick brown fox jumps over the lazy dog ').repeat(12);
+  const e = SPAB.encode(cover, 'BLK', { classes: ['ws'], block: 5 });
+  ok(SPAB.decode(e.text, { classes: ['ws'], block: 5 }).message === 'BLK', 'block=5 round-trips');
+  ok(SPAB.decode(e.text, { classes: ['ws'], block: 9 }).message !== 'BLK', 'mismatched block does not decode');
+  // symbol-layer capacity honors the site cap (smaller blocks may pack slightly fewer bits)
+  var r10 = new Array(10).fill(4);
+  ok(SPAB.symbols.capacity(r10, 2) <= SPAB.symbols.capacity(r10, 0), 'smaller block cap <= product-cap capacity');
+})();
+
+// -- dense carrier: wsdense (length-preserving, 3 bits/gap) --
+(function () {
+  const cover = ('the quick brown fox jumps over the lazy dog ').repeat(8);
+  const e = SPAB.encode(cover, 'DENSE-WS', { classes: ['wsdense'] });
+  ok(e.text.length === cover.length, 'wsdense preserves text length (substitution)');
+  const d = SPAB.decode(e.text, { classes: ['wsdense'] });
+  ok(d.message === 'DENSE-WS' && d.metadata.status !== 'not-detected', 'wsdense round-trips');
+  ok(SPAB.CLASS_DEFS.wsdense.read('abc', 1) === 0, 'wsdense.read on non-space returns 0');
+  ok(SPAB.decode(cover, { classes: ['wsdense'] }).metadata.status === 'not-detected', 'wsdense clean -> not-detected');
+})();
+
+// -- dense carrier: zwsp (zero-width insertion, 2 bits/char) --
+(function () {
+  const cover = ('the quick brown fox jumps over the lazy dog ').repeat(8);
+  const e = SPAB.encode(cover, 'ZW-42', { classes: ['zwsp'] });
+  ok(e.text.length > cover.length, 'zwsp inserts characters (length grows)');
+  ok(e.text.replace(/[​‌‍⁠]/g, '') === cover, 'zwsp leaves visible text identical');
+  const d = SPAB.decode(e.text, { classes: ['zwsp'] });
+  ok(d.message === 'ZW-42', 'zwsp round-trips (repetition)');
+  const er = SPAB.encode(cover, 'ZW-RL', { classes: ['zwsp'], ecc: 'rlnc' });
+  ok(SPAB.decode(er.text, { classes: ['zwsp'], ecc: 'rlnc' }).message === 'ZW-RL', 'zwsp round-trips (rlnc)');
+  ok(SPAB.decode(cover, { classes: ['zwsp'] }).metadata.status === 'not-detected', 'zwsp clean -> not-detected');
+  // custom density param
+  const ed = SPAB.encode(cover, 'D', { classes: ['zwsp'], density: 3 });
+  ok(SPAB.decode(ed.text, { classes: ['zwsp'], density: 3 }).message === 'D', 'zwsp honors params.density');
+})();
+
+// -- getSites across a mix incl. an insert-kind class (exercises detect||anchors) --
+(function () {
+  const sites = SPAB.getSites("it's a well-known test today here now", { classes: ['ws', 'wsdense', 'zwsp'] });
+  ok(sites.length > 0 && sites.some(function (s) { return s.id === 'zwsp'; }), 'getSites includes zwsp anchors');
+})();
+
 // -- browser-global branch of the IIFE wrapper (root = window) --
 (function () {
   const path = require('path');

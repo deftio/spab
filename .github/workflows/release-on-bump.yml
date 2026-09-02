@@ -1,0 +1,71 @@
+name: Release on version bump
+
+# Push-driven releases. When CI succeeds on main, this checks whether package.json's
+# version already has a matching tag. If not (i.e. the push bumped the version), it
+# creates tag vX.Y.Z at the tested commit and cuts the GitHub Release from the matching
+# CHANGELOG section. Ordinary pushes that don't change the version do nothing.
+#
+# You control the number — bump it in your commit; the workflow never invents versions.
+# (Manual `git push vX.Y.Z` still works too, via release.yml.)
+
+on:
+  workflow_run:
+    workflows: ["CI"]          # must match the `name:` in ci.yml
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write              # create tags + releases
+
+jobs:
+  release:
+    # only when CI actually passed
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}   # the exact commit CI tested
+          fetch-depth: 0                                    # need history + tags
+
+      - name: Read version
+        id: ver
+        run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Release if this version has no tag yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.ver.outputs.v }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --quiet
+          if git rev-parse -q --verify "refs/tags/v$VER" >/dev/null; then
+            echo "tag v$VER already exists — no release (version not bumped)."
+            exit 0
+          fi
+
+          # Belt-and-suspenders: source versions must agree before we tag.
+          node -e '
+            const s=require("./src/js/spab.js").VERSION, p=require("./src/js/package.json").version, r=require("./package.json").version;
+            if (!(s===p && p===r)) { console.error("version mismatch:", {s,p,r}); process.exit(1); }
+          '
+
+          # Release notes from the matching CHANGELOG section (fallback if absent).
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { grab=1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then echo "Release $VER." > RELEASE_NOTES.md; fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VER" -m "spab v$VER" "$SHA"
+          git push origin "v$VER"
+
+          gh release create "v$VER" \
+            --target "$SHA" \
+            --title "spab v$VER" \
+            --notes-file RELEASE_NOTES.md
+          echo "released v$VER"

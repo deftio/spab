@@ -7,6 +7,43 @@ are development milestones of the JavaScript reference implementation (`src/js/s
 ## [Unreleased]
 
 ### Added
+- **Keyed scramble (opt-in): interleave + whitening.** With `params.key`, the symbol stream is
+  whitened (key-derived PN added mod radix — flattens carrier statistics, hides structure) and
+  interleaved by a key-derived permutation (spreads burst damage across mixed-radix blocks, obscures
+  order). Right key recovers; wrong/no key fail. Both are key-derived (cryptography-flavored, not
+  hidden-constant obscurity) and are a **cost multiplier, not confidentiality** — that awaits the
+  planned AEAD. Identity when no key, so keyless behavior/vectors are unchanged. Wired into the
+  playground as an optional "Scramble key" field.
+- **Tunable block size.** `params.block` caps mixed-radix block length in sites (0 = product-cap
+  only); block size and its bit width need not be powers of two, and it's an empirical knob to tune
+  later. Encoder/decoder must use the same value.
+- **Mixed-radix symbol layer (all carriers).** The ECC bit stream is now mapped to carrier symbols
+  through one uniform modulation layer that packs bits by **blocked mixed-radix (base) conversion**,
+  recovering the fractional bits a power-of-two, per-site packer discards (a radix-3 carrier now gets
+  ~1.5 bits/site instead of 1.0). Packing is done in bounded blocks (radix-product ≤ 2³²) so a damaged
+  symbol corrupts only its block (≤32 bits) — locality preserved, ECC unchanged. Power-of-two carriers
+  are bit-identical in density but now share the one code path (no special-casing). Exposed as
+  `SPAB.symbols` for introspection/conformance. *(Pre-release wire-format change.)*
+- **Dense carriers.** Two new, opt-in carrier classes: **`zwsp`** (zero-width insertion — a 4-symbol
+  zero-width alphabet, 2 bits/char, StegCloak/330k-style; high capacity but adds length and is
+  hex-visible) and **`wsdense`** (8 whitespace variants, 3 bits/gap; length-preserving). encode/decode
+  now support insert-kind carriers. Still 100% branch coverage; fuzz covers both.
+- **Playground rework.** Carrier highlighting now defaults **off**; the watermarked text is an
+  **editable** textarea (edit it and watch decode survive), an **encoding-method selector** (sparse /
+  dense-whitespace / dense-zero-width), and an expandable **Stats & capacity** panel (cover chars,
+  watermarked chars + Δ, payload/frame, capacity, bits-per-char, copies/packets, per-channel sites).
+- **Base-N packer prototype** (`r_and_d/basen.js`, `npm run basen`) — zero-dep mixed-radix packing
+  over heterogeneous carrier radices, recovering the fractional bits a power-of-two per-site packer
+  discards (measured: +29% for a 6-symbol zero-width alphabet, +58% for 3 whitespace variants; 0% for
+  pure powers of two). Round-trips 4000/4000. R&D, not yet in the shipping codec.
+- **Detectability metric** in the playground Stats panel — a proxy learned from the references: for
+  substitution methods, the share of spaces that are non-standard variants (a whitespace-histogram
+  tell); for `zwsp`, the invisible-character ratio (found instantly in a hex view). Shown with a
+  LOW/MEDIUM/HIGH badge that updates live as you edit.
+- **Prior-art doc** (`r_and_d/docs/prior-art-and-tradeoffs.md`) — shout-outs to related tools
+  (StegCloak, 330k, stegtext, markovTextStego, Tomato, Priyansh-15, Agarwal 2013), an
+  approaches/tradeoffs map, and a discussion of open-source vs. security-by-obscurity (Kerckhoffs;
+  keyed confidentiality; obscurity only as a documented cost-multiplier).
 - **Lint gate (`tests/lint.js`).** Zero-dependency, blocking — **any finding fails the build**
   (warnings are errors). Enforces `.editorconfig` across all source (UTF-8/no BOM, LF, final
   newline, no trailing whitespace, space indent), `node --check` on every `.js` and on the inline
@@ -25,9 +62,22 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   + tests) and inert-until-credentialed npm/PyPI publish stubs (`publish.yml`, gated on
   `NPM_TOKEN`/`PYPI_TOKEN`). Branch-protection rules documented in `RELEASING.md`.
 - **Pages: per-language integration page** — sticky TOC + anchored install/usage sections for
-  JavaScript, CLI, Rust, C/C++, Python, Java/Kotlin, Swift, with a shared-API sidebar.
+  JavaScript, CLI, Rust, C/C++, Python, Java/Kotlin, Swift, with a shared-API sidebar. Added a
+  **GitHub** link to the site nav, a root `index.html` that redirects to `pages/`, and README
+  status badges (CI, version, npm, branch coverage, license, GitHub).
+- **Release on version bump** (`release-on-bump.yml`) — a push to `main` that bumps the version
+  auto-tags `vX.Y.Z` and cuts the Release once CI passes; `release.yml` remains the manual-tag
+  fallback. **Branch-protection setup script** (`.github/scripts/setup-branch-protection.sh`)
+  applies the `main` protection documented in `RELEASING.md` via `gh`.
 
 ### Changed
+- **Branching & merging etiquette** documented in `CONTRIBUTING.md` (trunk-based, `type/desc`
+  branches, Conventional Commits, squash-merge to linear history, PR + green CI), with a
+  `.github/pull_request_template.md`. Releases are a version-bump PR to `main` (auto-cut), not manual
+  tags.
+- **Branch-protection script is solo-safe:** defaults to **0 required approvals** (GitHub blocks
+  self-approval, so a solo maintainer self-merges on green CI) with `REQUIRED_APPROVALS`/
+  `ENFORCE_ADMINS` overrides for teams; documented in `RELEASING.md`.
 - CI runs fuzz + coverage as report-only steps (measure now, gate later); adds the branch-test suite
   to the blocking run; adds the lint gate as the first blocking step.
 - Small behavior-preserving simplifications in `spab.js` (removed provably-dead capacity guards).

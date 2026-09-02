@@ -40,7 +40,7 @@ function makeRunId() {
   return 'run-' + ts + '-' + rnd;
 }
 
-// Build the run manifest. `spab` is the required spab module (has VERSION/ALGORITHM).
+// Build the run manifest. `spab` is the required spab module (has VERSION/algorithm).
 function makeRunMeta(opts) {
   var repoDir = path.join(__dirname, '..');
   var spabPath = path.join(repoDir, 'src', 'js', 'spab.js');
@@ -50,7 +50,7 @@ function makeRunMeta(opts) {
     note: opts.note || null,
     spab: {
       version: opts.spab.VERSION,
-      algorithm: opts.spab.ALGORITHM,
+      algorithm: opts.spab.algorithm,
       sourceHash: sha256File(spabPath) // detects code changes even without a version bump
     },
     git: gitInfo(repoDir),

@@ -69,7 +69,14 @@
     "\"Keep the spacing,\" she said, \"and the punctuation too.\" The long-standing custom, quietly kept, " +
     "travels wherever the text is copied, from letter to letter and line to line, through many a re-reading. ".repeat(3);
   var WSV = [0x2006, 0x2009, 0x200A];
-  var st = { cover: SAMPLE, msg: 'spab-2026', cls: { ws: true, apos: true, hyphen: true }, ecc: 'repetition', showCarriers: true, wm: null, params: null, active: {} };
+  var ZWV = [0x200B, 0x200C, 0x200D, 0x2060];
+  var WSDV = [0x2009, 0x200A, 0x2006, 0x2005, 0x2004, 0x2008, 0x205F];
+  var METHODS = {
+    sparse:  { label: 'Sparse — whitespace + confusables (length-preserving, default)' },
+    wsdense: { label: 'Dense whitespace — 8 space variants (length-preserving)' },
+    zwsp:    { label: 'Dense zero-width — inserts invisible chars (StegCloak-style)' }
+  };
+  var st = { cover: SAMPLE, msg: 'spab-2026', method: 'sparse', cls: { ws: true, apos: true, hyphen: true }, ecc: 'repetition', key: '', showCarriers: false, wm: null, params: null, meta: null, active: {} };
   function R() { return Math.random(); }
   var A = {
     normalize:   { label: 'normalize', p: 0.3, fn: function (t, p) { return t.split('').map(function (ch) { var c = ch.charCodeAt(0); return (WSV.indexOf(c) >= 0 && R() < p) ? ' ' : ch; }).join(''); } },
@@ -81,31 +88,100 @@
     truncate:    { label: 'truncate', p: 0.5, fn: function (t, p) { return t.slice(0, Math.max(1, Math.floor(t.length * p))); } },
     wordDelete:  { label: 'word delete', p: 0.1, fn: function (t, p) { return t.split(/(\s+)/).filter(function (_, i) { return i % 2 === 1 || R() >= p; }).join(''); } }
   };
-  function params() { var c = []; if (st.cls.ws) c.push('ws'); if (st.cls.apos) c.push('apos'); if (st.cls.hyphen) c.push('hyphen'); return { classes: c.length ? c : ['ws'], ecc: st.ecc }; }
+  function params() {
+    if (st.method === 'wsdense') return { classes: ['wsdense'], ecc: st.ecc };
+    if (st.method === 'zwsp') return { classes: ['zwsp'], ecc: st.ecc };
+    var c = []; if (st.cls.ws) c.push('ws'); if (st.cls.apos) c.push('apos'); if (st.cls.hyphen) c.push('hyphen');
+    return { classes: c.length ? c : ['ws'], ecc: st.ecc };
+  }
+  function withKey(p) { if (st.key) p.key = st.key; return p; }
   function applyAttacks(text) { Object.keys(A).forEach(function (k) { if (st.active[k]) text = A[k].fn(text, A[k].p); }); return text; }
   function statusVariant(s) { return s === 'perfect' ? 'bw_success' : s === 'corrected' ? 'bw_warning' : 'bw_danger'; }
+  // Detectability proxy (learned from StegCloak's "the Warden can count invisibles" +
+  // Agarwal's cover/stego similarity): how much the marked text deviates from natural.
+  function detectability(text) {
+    if (st.method === 'zwsp') {
+      var inv = 0; for (var i = 0; i < text.length; i++) if (ZWV.indexOf(text.charCodeAt(i)) >= 0) inv++;
+      var pct = text.length ? Math.round(1000 * inv / text.length) / 10 : 0;
+      return { pct: pct, label: inv ? 'HIGH' : 'none', variant: inv ? 'bw_danger' : 'bw_success',
+        detail: inv + ' zero-width chars (' + pct + '% of length) — trivially found in a hex / show-invisibles view' };
+    }
+    var variants = st.method === 'wsdense' ? WSDV : WSV;
+    var spaces = 0, odd = 0;
+    for (var j = 0; j < text.length; j++) { var c = text.charCodeAt(j); if (c === 0x20) spaces++; else if (variants.indexOf(c) >= 0) { spaces++; odd++; } }
+    var share = spaces ? Math.round(1000 * odd / spaces) / 10 : 0;
+    var lvl = share < 2 ? ['LOW', 'bw_success'] : share < 15 ? ['MEDIUM', 'bw_warning'] : ['HIGH', 'bw_danger'];
+    return { pct: share, label: lvl[0], variant: lvl[1],
+      detail: 'visually identical; but ' + odd + '/' + spaces + ' spaces are non-standard variants — a whitespace-histogram test flags ' + share + '%' };
+  }
   function markerHTML(text) {
     if (!st.showCarriers) return bw.escapeHTML(text);
-    var ids = SPAB.resolveClasses(params()), mark = {};
-    if (ids.indexOf('ws') >= 0) { var map = {}; SPAB.SPACE_MAP.forEach(function (c, i) { map[c] = i; }); SPAB.getSlots(text).forEach(function (i) { var v = map[text[i]]; if (v !== undefined) mark[i] = { t: 'ws', v: v }; }); }
-    var pc = []; if (ids.indexOf('apos') >= 0) pc.push(0x27, 0x2019); if (ids.indexOf('hyphen') >= 0) pc.push(0x2d, 0x2010);
-    for (var i = 0; i < text.length; i++) if (pc.indexOf(text.charCodeAt(i)) >= 0 && !mark[i]) mark[i] = { t: 'p' };
+    var ids = SPAB.resolveClasses(params());
+    var wsMap = {}; SPAB.SPACE_MAP.forEach(function (c, i) { wsMap[c] = i; });
     var out = '';
-    for (i = 0; i < text.length; i++) {
-      if (mark[i] && mark[i].t === 'ws') out += '<span class="slot v' + mark[i].v + '">' + mark[i].v + '</span>';
-      else if (mark[i]) out += '<span class="pmark">' + bw.escapeHTML(text[i]) + '</span>';
-      else if (text[i] === '\n') out += '<br>';
-      else out += bw.escapeHTML(text[i]);
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i], code = text.charCodeAt(i);
+      if (ids.indexOf('ws') >= 0 && wsMap[ch] !== undefined) { out += '<span class="slot v' + wsMap[ch] + '">' + wsMap[ch] + '</span>'; continue; }
+      if (ids.indexOf('wsdense') >= 0 && (code === 0x20 || WSDV.indexOf(code) >= 0)) { var v = code === 0x20 ? 0 : WSDV.indexOf(code) + 1; out += '<span class="slot v' + (v % 4) + '">' + v + '</span>'; continue; }
+      if (ids.indexOf('zwsp') >= 0 && ZWV.indexOf(code) >= 0) { out += '<span class="pmark">' + ZWV.indexOf(code) + '</span>'; continue; }
+      if ((ids.indexOf('apos') >= 0 && (code === 0x27 || code === 0x2019)) || (ids.indexOf('hyphen') >= 0 && (code === 0x2d || code === 0x2010))) { out += '<span class="pmark">' + bw.escapeHTML(ch) + '</span>'; continue; }
+      if (ch === '\n') out += '<br>'; else out += bw.escapeHTML(ch);
     }
     return out;
   }
+  // compact summary badges (always visible)
   function updateMeta(md) {
-    var chans = md.channels || {}, chStr = Object.keys(chans).map(function (id) { return id + ':' + chans[id].sites; }).join(' ');
-    var items = [badge('ecc ' + md.ecc), badge('classes ' + (md.classes || []).join('+')), badge('sites ' + chStr), badge((md.ecc === 'rlnc' ? 'packets ' : 'copies ') + md.reps), badge('payload ' + md.payloadBytes + 'B')];
+    var items = [badge('method ' + st.method), badge('ecc ' + md.ecc), badge('carriers ' + (md.classes || []).join('+')),
+      badge((md.ecc === 'rlnc' ? 'packets ' : 'copies ') + md.reps), badge('payload ' + md.payloadBytes + 'B')];
     if (md.issues && md.issues.length) items.push(badge(md.issues.join(' '), 'bw_warning'));
     bw.DOM('#encMeta', { t: 'div', a: { class: 'metawrap' }, c: items });
   }
-  function updateMarker() { bw.DOM('#markerView', { t: 'div', a: { class: 'spab-view' }, c: bw.raw(markerHTML(st.wm)) }); }
+  // detailed, expandable stats (chars, encoded chars, ratios, capacity, method, …)
+  function statRow(k, v) { return { t: 'tr', c: [{ t: 'td', a: { style: bw.s({ opacity: '.65', paddingRight: '18px', whiteSpace: 'nowrap' }) }, c: k }, { t: 'td', a: { style: bw.s({ fontFamily: 'ui-monospace,Menlo,monospace', textAlign: 'right' }) }, c: v }] }; }
+  function renderStats() {
+    var md = st.meta; if (!md) return;
+    var chans = md.channels || {};
+    var coverN = st.cover.length, wmN = st.wm ? st.wm.length : 0, added = wmN - coverN;
+    var cap = md.capacityBits || 0, frameBits = md.frameBits || 0;
+    var util = cap ? Math.round(1000 * frameBits / cap) / 10 : 0;      // one copy uses this % of capacity
+    var bpc = coverN ? Math.round(100 * cap / coverN) / 100 : 0;        // carrier bits per cover char
+    var edited = st.wm !== st._encoded;
+    var chStr = Object.keys(chans).map(function (id) { return id + ' ' + chans[id].sites + '×' + (chans[id].capacityBits) + 'b'; }).join(', ') || '—';
+    var rows = [
+      statRow('method', METHODS[st.method].label.split(' — ')[0]),
+      statRow('carriers', (md.classes || []).join(' + ')),
+      statRow('ecc', md.ecc + (md.ecc === 'rlnc' ? ' (GF(256) fountain)' : ' (repetition + majority)')),
+      statRow('scramble key', st.key ? 'set — keyed interleave + whitening' : 'none'),
+      statRow('cover chars', String(coverN)),
+      statRow('watermarked chars', wmN + (added ? '  (Δ ' + (added > 0 ? '+' : '') + added + ')' : '  (unchanged length)') + (edited ? '  · edited' : '')),
+      statRow('payload', md.payloadBytes + ' B  (frame ' + md.frameBytes + ' B = ' + frameBits + ' bits)'),
+      statRow('capacity (strongest)', cap + ' bits'),
+      statRow('carrier bits / cover char', String(bpc)),
+      statRow(md.ecc === 'rlnc' ? 'packets emitted' : 'copies', String(md.reps)),
+      statRow('one copy uses', util + '% of capacity'),
+      statRow('channels (sites × cap)', chStr)
+    ];
+    var det = detectability(st.wm || '');
+    rows.push({ t: 'tr', c: [
+      { t: 'td', a: { style: bw.s({ opacity: '.65', paddingRight: '18px', whiteSpace: 'nowrap' }) }, c: 'detectability' },
+      { t: 'td', a: { style: bw.s({ textAlign: 'right' }) }, c: [badge(det.label + ' · ' + det.pct + '%', det.variant)] }
+    ] });
+    rows.push(statRow('', { t: 'span', a: { style: bw.s({ fontSize: '12px', opacity: '.7', fontFamily: 'inherit' }) }, c: det.detail }));
+    if (md.issues && md.issues.length) rows.push(statRow('notes', md.issues.join(' ')));
+    bw.DOM('#statsPanel', { t: 'details', a: { style: bw.s({ marginTop: '14px', border: '1px solid ' + p.light.border, borderRadius: '8px', padding: '8px 12px' }) }, c: [
+      { t: 'summary', a: { style: bw.s({ cursor: 'pointer', fontWeight: '600', fontSize: '13px' }) }, c: 'Stats & capacity' },
+      { t: 'table', a: { style: bw.s({ marginTop: '8px', fontSize: '13px', width: '100%' }) }, c: { t: 'tbody', c: rows } }
+    ] });
+  }
+  // watermarked text: editable textarea by default; highlighted read-only when "show carriers" is on
+  function updateMarker() {
+    if (st.showCarriers) {
+      bw.DOM('#markerView', { t: 'div', a: { class: 'spab-view' }, c: bw.raw(markerHTML(st.wm)) });
+    } else {
+      bw.DOM('#markerView', { t: 'textarea', a: { class: 'bw_form_control spab-view', spellcheck: 'false', rows: 8,
+        oninput: function (e) { st.wm = e.target.value; runDecode(); renderStats(); } }, c: st.wm || '' });
+    }
+  }
   function runDecode() {
     var d = SPAB.decode(applyAttacks(st.wm), st.params), md = d.metadata, match = d.message !== null && d.message === st.msg;
     var items = [badge(md.status.toUpperCase(), statusVariant(md.status)),
@@ -129,8 +205,25 @@
     });
     bw.DOM('#sliderRow', { t: 'div', c: rows });
   }
-  function doEncode() { st.params = params(); var res = SPAB.encode(st.cover, st.msg, st.params); st.wm = res.text; updateMeta(res.metadata); updateMarker(); runDecode(); }
-  function initTest() { renderAttacks(); doEncode(); }
+  function doEncode() {
+    st.params = withKey(params());
+    var res = SPAB.encode(st.cover, st.msg, st.params);
+    st.wm = res.text; st._encoded = res.text; st.meta = res.metadata;
+    updateMeta(res.metadata); updateMarker(); renderStats(); runDecode();
+  }
+  function renderCarrierRow() {
+    var body = st.method === 'sparse'
+      ? { t: 'div', c: [
+          checkbox('whitespace', st.cls.ws, function (e) { st.cls.ws = e.target.checked; doEncode(); }),
+          checkbox('apostrophe', st.cls.apos, function (e) { st.cls.apos = e.target.checked; doEncode(); }),
+          checkbox('hyphen', st.cls.hyphen, function (e) { st.cls.hyphen = e.target.checked; doEncode(); })
+        ] }
+      : { t: 'div', a: { style: bw.s({ fontSize: '13px', opacity: '.7' }) }, c: st.method === 'zwsp'
+          ? 'Zero-width mode uses a single inserted carrier (2 bits/char). Length grows; visible in a hex view.'
+          : 'Dense-whitespace mode uses 8 space variants (3 bits/gap). Length preserved.' };
+    bw.DOM('#carrierRow', body);
+  }
+  function initTest() { renderAttacks(); renderCarrierRow(); doEncode(); }
 
   function checkbox(label, checked, onchange) {
     return { t: 'label', a: { style: bw.s({ display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '14px', cursor: 'pointer' }) }, c: [{ t: 'input', a: { type: 'checkbox', checked: checked, onchange: onchange } }, label] };
@@ -145,21 +238,25 @@
         bw.makeCard({ title: '1 · Encode', content: { t: 'div', c: [
           field('Cover text', { t: 'textarea', a: { class: 'bw_form_control', rows: 6, oninput: function (e) { st.cover = e.target.value; } }, c: st.cover }),
           field('Message', { t: 'input', a: { class: 'bw_form_control', type: 'text', value: st.msg, oninput: function (e) { st.msg = e.target.value; } } }),
+          field('Method', { t: 'select', a: { class: 'bw_form_control', onchange: function (e) { st.method = e.target.value; renderCarrierRow(); doEncode(); } },
+            c: Object.keys(METHODS).map(function (m) { return { t: 'option', a: { value: m }, c: METHODS[m].label }; }) }),
           { t: 'div', a: { style: bw.s({ display: 'flex', gap: '18px', flexWrap: 'wrap', alignItems: 'flex-end' }) }, c: [
-            field('Carrier classes', { t: 'div', c: [
-              checkbox('whitespace', st.cls.ws, function (e) { st.cls.ws = e.target.checked; doEncode(); }),
-              checkbox('apostrophe', st.cls.apos, function (e) { st.cls.apos = e.target.checked; doEncode(); }),
-              checkbox('hyphen', st.cls.hyphen, function (e) { st.cls.hyphen = e.target.checked; doEncode(); })
-            ] }),
-            field('ECC', { t: 'select', a: { class: 'bw_form_control', style: bw.s({ width: 'auto' }), onchange: function (e) { st.ecc = e.target.value; doEncode(); } }, c: [{ t: 'option', a: { value: 'repetition' }, c: 'repetition' }, { t: 'option', a: { value: 'rlnc' }, c: 'RLNC fountain' }] })
+            field('Carriers', { t: 'div', a: { id: 'carrierRow' } }),
+            field('ECC', { t: 'select', a: { class: 'bw_form_control', style: bw.s({ width: 'auto' }), onchange: function (e) { st.ecc = e.target.value; doEncode(); } }, c: [{ t: 'option', a: { value: 'repetition' }, c: 'repetition' }, { t: 'option', a: { value: 'rlnc' }, c: 'RLNC fountain' }] }),
+            field('Scramble key (optional)', { t: 'input', a: { class: 'bw_form_control', type: 'text', placeholder: 'none', value: st.key, style: bw.s({ width: '150px' }), oninput: function (e) { st.key = e.target.value; doEncode(); } } })
           ] },
           { t: 'div', a: { style: bw.s({ marginTop: '8px' }) }, c: bw.makeButton({ text: 'Encode ▶', variant: 'primary', onclick: doEncode }) },
-          { t: 'div', a: { id: 'encMeta', style: bw.s({ marginTop: '14px' }) } }
+          { t: 'div', a: { id: 'encMeta', style: bw.s({ marginTop: '14px' }) } },
+          { t: 'div', a: { id: 'statsPanel' } }
         ] } }),
         bw.makeCard({ title: '2 · Watermarked text', content: { t: 'div', c: [
           checkbox('show carriers', st.showCarriers, function (e) { st.showCarriers = e.target.checked; updateMarker(); }),
+          { t: 'span', a: { style: bw.s({ fontSize: '12px', opacity: '.6' }) }, c: 'edit the text below to see decode survive your changes' },
           { t: 'div', a: { id: 'markerView', style: bw.s({ marginTop: '8px' }) } },
-          { t: 'div', a: { style: bw.s({ marginTop: '10px' }) }, c: bw.makeButton({ text: 'Copy', variant: 'outline-secondary', size: 'sm', onclick: function () { if (st.wm && navigator.clipboard) navigator.clipboard.writeText(st.wm); } }) }
+          { t: 'div', a: { style: bw.s({ marginTop: '10px', display: 'flex', gap: '8px' }) }, c: [
+            bw.makeButton({ text: 'Copy', variant: 'outline-secondary', size: 'sm', onclick: function () { if (st.wm && navigator.clipboard) navigator.clipboard.writeText(st.wm); } }),
+            bw.makeButton({ text: 'Reset to encoded', variant: 'light', size: 'sm', onclick: function () { st.wm = st._encoded; updateMarker(); renderStats(); runDecode(); } })
+          ] }
         ] } })
       ] },
       bw.makeCard({ title: '3 · Channel attacks', content: { t: 'div', c: [
@@ -224,6 +321,12 @@
       { t: 'h3', c: 'Error correction' },
       { t: 'p', a: { class: 'prose' }, c: bw.raw('Two ECC modes. <b>Repetition</b> (default) writes the framed payload many times and majority-votes per bit — strong when a channel is dense. <b>RLNC fountain</b> (a from-scratch GF(256) random-linear code) breaks the payload into self-checking, self-locating packets that <i>pool across all channels</i>, so surviving carriers reconstruct the whole message. Both are dependency-free.') },
 
+      { t: 'h3', c: 'Symbol packing (no wasted bits)' },
+      { t: 'p', a: { class: 'prose' }, c: bw.raw('Between the ECC bit stream and the carrier glyphs sits one <b>mixed-radix symbol layer</b>. A carrier with <i>N</i> equivalent glyphs per site holds log<sub>2</sub><i>N</i> bits — often fractional (a 3-way choice is 1.585 bits, not 1). Rather than round down at every site and throw those fractions away, spab packs the bit stream into the sites by base conversion, in <b>bounded blocks</b> so a damaged symbol only affects its block (never the whole message). Every carrier — even the power-of-two ones — flows through the same layer.') },
+
+      { t: 'h3', c: 'Optional keyed scramble' },
+      { t: 'p', a: { class: 'prose' }, c: bw.raw('Pass a <b>key</b> and the symbol stream is <b>whitened</b> (a key-derived pseudo-random value is added to each symbol, flattening the carrier statistics) and <b>interleaved</b> (a key-derived permutation spreads burst damage across blocks and hides the order). Right key decodes; wrong or missing key does not. This is <i>keyed</i> — cryptography, not a hidden constant — but it is a <b>cost multiplier, not confidentiality</b>: real secrecy will come from the planned authenticated cipher. Leftover capacity beyond the payload is filled with the neutral default symbol, so a short message in a long passage still reads naturally.') },
+
       { t: 'h3', c: 'Capacity vs. robustness' },
       { t: 'p', a: { class: 'prose' }, c: bw.raw('More redundancy = more survivable, less payload. A short passage holds a tiny serial ultra-redundantly; a long document holds a hash, JSON, or an easter-egg program. Match payload size to text length, then spend the rest on redundancy.') },
 
@@ -268,7 +371,8 @@
             'Same shape everywhere:<br><code>encode(baseText, message, key?, options?) → { text, meta }</code><br>' +
             '<code>decode(markedText, key?, options?) → { message, meta }</code><br><br>' +
             '<code>options.ecc</code> = <code>"repetition"</code> | <code>"rlnc"</code>; ' +
-            '<code>options.classes</code> = carrier set. Same input → same output on every platform.') } })
+            '<code>options.classes</code> = carrier set; optional <code>key</code> (keyed interleave + ' +
+            'whitening) and <code>block</code> (symbol block size). Same input → same output on every platform.') } })
         ] },
 
         { t: 'div', c: [
@@ -276,7 +380,7 @@
             bw.raw('The reference implementation. Runs in Node and the browser, zero dependencies. <i>Not yet on npm — use from source; <code>@deftio/spab</code> is coming.</i>'),
             "# from source (today)\ncp path/to/spab/src/js/spab.js .\n\n# coming soon\nnpm i @deftio/spab",
             "// Node / CommonJS\nconst SPAB = require('./spab.js');\n\nconst { text, metadata } = SPAB.encode('your cover text here', 'my-id', { ecc: 'rlnc' });\nconst { message }        = SPAB.decode(text, { ecc: 'rlnc' });\nconsole.log(message); // 'my-id'\n\n// Browser\n// <script src=\"spab.js\"><\/script>  →  window.SPAB.encode(...)",
-            bw.raw('Exports: <code>encode</code>, <code>decode</code>, <code>getSlots</code>, <code>histogram</code>, <code>VERSION</code>, <code>ALGORITHM</code>.')),
+            bw.raw('Exports: <code>encode</code>, <code>decode</code>, <code>getSlots</code>, <code>histogram</code>, <code>symbols</code>, <code>VERSION</code>, <code>algorithm</code>.')),
 
           langSection('cli', 'Command line', 'ready', 'bw_success',
             'A Node CLI wraps the library for quick use and scripting.',
@@ -325,10 +429,14 @@
 
   // ================= shell + router =================
   var NAV = [['#/', 'Home'], ['#/how', 'How it works'], ['#/test', 'Playground'], ['#/libraries', 'Libraries']];
+  var GITHUB_URL = 'https://github.com/deftio/spab';
   function navbar(active) {
     return { t: 'div', a: { class: 'nav' }, c: { t: 'div', a: { class: 'wrap' }, c: [
       { t: 'a', a: { href: '#/', class: 'brand' }, c: 'spab' }
-    ].concat(NAV.map(function (n) { return { t: 'a', a: { href: n[0], class: 'navlink' + (('#' + active) === n[0] || (active === '/' && n[0] === '#/') ? ' active' : '') }, c: n[1] }; })) } };
+    ].concat(NAV.map(function (n) { return { t: 'a', a: { href: n[0], class: 'navlink' + (('#' + active) === n[0] || (active === '/' && n[0] === '#/') ? ' active' : '') }, c: n[1] }; }))
+      .concat([{ t: 'a', a: { href: GITHUB_URL, class: 'navlink', target: '_blank', rel: 'noopener',
+        style: bw.s({ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px' }) },
+        c: bw.raw('<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="vertical-align:-2px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>GitHub') }]) } };
   }
   function shell() {
     bw.DOM('#app', { t: 'div', c: [

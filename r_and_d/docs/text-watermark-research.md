@@ -2,6 +2,10 @@
 
 Background research for spab, a robust text watermarking library. Focus: hiding a message in the *whitespace* of visible text, resiliently enough to survive normal editing.
 
+> See also [`prior-art-and-tradeoffs.md`](prior-art-and-tradeoffs.md) — the running list of related
+> tools (StegCloak, 330k, stegtext, markovTextStego, Tomato, Agarwal 2013, …), an approaches/tradeoffs
+> map, and the open-source-vs-security-by-obscurity discussion.
+
 ## 1. Fragile baseline: format-based whitespace steganography
 
 The classic approach appends invisible tabs/spaces to the ends of lines. A space = 0, a tab (or double space) = 1; markers sit before the newline so they're invisible in normal rendering.

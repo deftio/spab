@@ -28,7 +28,7 @@ function rng(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0
 const WORDS = ('the of and to in is it you that he was for on are with as his they at be this from have or by ' +
   'one had not but what all were when we there can an your which their said if do will each about how up out them ' +
   'don\'t can\'t it\'s well-known state-of-the-art mother-in-law user\'s time-out follow-up').split(' ');
-const CLASS_SETS = [undefined, ['ws'], ['ws', 'punct'], ['apos'], ['hyphen'], ['ws', 'apos', 'hyphen'], ['punct']];
+const CLASS_SETS = [undefined, ['ws'], ['ws', 'punct'], ['apos'], ['hyphen'], ['ws', 'apos', 'hyphen'], ['punct'], ['wsdense'], ['zwsp']];
 const ECCS = ['repetition', 'rlnc'];
 const MSG_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.: /#@'.split('')
   .concat(['é', 'ü', 'ñ', '—', '…', '你', '好', '🙂', '\'', '"']);
@@ -80,6 +80,8 @@ for (let i = 0; i < ITERS; i++) {
   const cover = makeCover(r);
   const message = makeMessage(r);
   const params = { classes: pick(r, CLASS_SETS), ecc: pick(r, ECCS) };
+  if (r() < 0.3) params.key = 'k' + randInt(r, 0, 9999);      // exercise keyed scramble (same key both ways)
+  if (r() < 0.15) params.block = randInt(r, 3, 20);           // exercise the block-size knob
 
   // --- invariant 1: round-trip when capacity allows ---
   let enc;
@@ -93,8 +95,11 @@ for (let i = 0; i < ITERS; i++) {
     catch (e) { fail(seed, i, 'decode threw: ' + e.message, { message, params }); continue; }
     checked++;
     if (dec.message !== message) fail(seed, i, 'round-trip mismatch', { got: dec.message, want: message, params, status: dec.metadata.status });
-    // visible text must be identical modulo carrier glyph swaps (same length)
-    if (enc.text.length !== cover.length) fail(seed, i, 'length changed by encode', { params });
+    // substitution carriers preserve length; the insert carrier (zwsp) adds zero-width
+    // chars but must leave the VISIBLE text identical.
+    const isInsert = Array.isArray(params.classes) && params.classes.indexOf('zwsp') !== -1;
+    if (!isInsert && enc.text.length !== cover.length) fail(seed, i, 'length changed by encode', { params });
+    if (isInsert && enc.text.replace(/[​‌‍⁠]/g, '') !== cover) fail(seed, i, 'zwsp altered visible text', { params });
   }
 
   // --- invariant 2: no false alarm on unmarked text ---

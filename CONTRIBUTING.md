@@ -74,8 +74,8 @@ stable (drop `continue-on-error` in `ci.yml`; use `coverage:strict`).
   CI must be green on Node 18/20/22.
 - **Version bumps are paired.** If you change the codec, bump `SPAB.VERSION` in `src/js/spab.js`
   **and** `version` in `src/js/package.json` (and the root `package.json`). CI checks they match.
-  Cutting a release is tag-driven — see [`RELEASING.md`](RELEASING.md) (and the branch-protection
-  rules it documents).
+  A bump merged to `main` auto-cuts the release — see [`RELEASING.md`](RELEASING.md) (and the
+  branch-protection rules it documents).
 - **Changelog.** Add an entry to `CHANGELOG.md` for any user-facing change (Keep a Changelog style).
 - **Code style.** `src/js/spab.js` is written in browser-and-Node-compatible JS with no dependencies;
   favor defined-width integer / GF math over language-specific idioms so ports can mirror it.
@@ -84,6 +84,40 @@ stable (drop `continue-on-error` in `ci.yml`; use `coverage:strict`).
   shared conformance vectors. Mirror the frozen wire-format spec in `r_and_d/docs`.
 - **Research vs. library.** Exploratory work (new carriers, ECC ideas, corpora) belongs in
   `r_and_d/`; only vetted, measured changes graduate into `src/`.
+
+## Branching & merging
+
+spab uses **trunk-based development**: `main` is always green and releasable, and work happens on
+short-lived branches that merge back quickly via pull request. There are no long-running `develop`
+or per-release branches.
+
+**Branch names** — `type/short-description`, matching the change type:
+`feat/…`, `fix/…`, `docs/…`, `test/…`, `refactor/…`, `perf/…`, `ci/…`, `chore/…`
+(e.g. `feat/zwsp-carrier`, `fix/rlnc-blank-packet`). Keep a branch to one logical change.
+
+**Commits** — [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`
+(`feat(codec): add zero-width carrier`, `fix(cli): handle EAGAIN on stdin`). This keeps history
+scannable and maps 1:1 onto the `CHANGELOG.md` sections. Write present-tense, imperative summaries.
+
+**Pull requests**
+- Open a PR into `main`; **direct pushes to `main` are blocked** by branch protection
+  (apply it with `.github/scripts/setup-branch-protection.sh` — see [`RELEASING.md`](RELEASING.md)).
+- CI must be green (lint, conformance + branch tests on Node 18/20/22, version-consistency) and all
+  review conversations resolved; keep the branch **up to date** with `main`. Approvals: **0 for a
+  solo maintainer** (self-merge on green CI — GitHub won't let you approve your own PR), **1+ for a
+  team**. Even solo, still merge through the PR so CI stays a gate.
+- Keep PRs small and focused. Describe *what* and *why*; link the issue. Include harness/coverage
+  numbers when they're relevant (see *Measure it*).
+
+**Merging**
+- **Squash-merge** so each change lands as one clean, conventionally-named commit → **linear history**
+  on `main` (no merge commits). **Delete the branch** after merge.
+- Never force-push `main` or rewrite its history (branch protection forbids it).
+- Rebase your branch on `main` (don't merge `main` into it) to resolve conflicts and stay current.
+
+**Releasing** is a normal PR that bumps the three version fields and moves the `CHANGELOG.md`
+`[Unreleased]` block to a `[x.y.z]` section; merging it to `main` triggers the release automatically
+(see [`RELEASING.md`](RELEASING.md)). No manual tagging needed.
 
 ## Measure it
 

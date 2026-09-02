@@ -36,7 +36,7 @@ var d3 = SPAB.decode(stripped, {});
 ok(d3.message === null, 'stripped watermark -> no false payload');
 
 // 5. version / algorithm descriptor is present (provenance contract)
-ok(typeof SPAB.VERSION === 'string' && SPAB.ALGORITHM && SPAB.ALGORITHM.name, 'exports VERSION and ALGORITHM descriptor');
+ok(typeof SPAB.VERSION === 'string' && SPAB.algorithm && SPAB.algorithm.name, 'exports VERSION and algorithm descriptor');
 
 // 6. confusables channel: round-trip with ws+punct classes enabled
 var apos = String.fromCharCode(0x27);
