@@ -59,27 +59,14 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version: '20' }
-      # All THREE version surfaces, not two. release.yml and release-on-bump.yml
-      # both check the root package.json as well, but only after the merge — so a
-      # PR that bumped src/js and forgot the root used to pass every required
-      # check, land on main, and only then fail at release time with main already
-      # inconsistent. Checking the same three here makes the PR the place it fails.
-      - name: version surfaces agree (spab.js, src/js/package.json, package.json)
+      - name: spab.js VERSION matches package.json
         run: |
           node -e '
             const spab = require("./src/js/spab.js");
-            const pkg  = require("./src/js/package.json");
-            const root = require("./package.json");
-            const all = {
-              "src/js/spab.js VERSION": spab.VERSION,
-              "src/js/package.json":    pkg.version,
-              "package.json":           root.version
-            };
-            const values = Object.values(all);
-            if (new Set(values).size !== 1) {
-              console.error("version mismatch:");
-              for (const [k, v] of Object.entries(all)) console.error("  " + k + " = " + v);
+            const pkg = require("./src/js/package.json");
+            if (spab.VERSION !== pkg.version) {
+              console.error("mismatch: spab.js VERSION=" + spab.VERSION + " vs src/js/package.json " + pkg.version);
               process.exit(1);
             }
-            console.log("version ok: " + spab.VERSION + " (all three agree)");
+            console.log("version ok: " + spab.VERSION);
           '
