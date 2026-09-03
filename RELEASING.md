@@ -22,77 +22,17 @@ You control the version number — the workflow never invents one. The workflows
 
 ## Cutting a release (normal path)
 
-Two npm commands. The first opens a release cycle, the second runs every gate and opens the PR;
-CI and branch protection do the rest.
+1. **Bump the version in all three places** (CI enforces they agree):
+   - `src/js/spab.js` → `VERSION`
+   - `src/js/package.json` → `version`
+   - `package.json` (root) → `version`
+2. **Add a `CHANGELOG.md` section** — `## [x.y.z] — YYYY-MM` (extracted verbatim for the release
+   notes; a matching section is how the notes get populated).
+3. **Open a PR, get CI green, merge to `main`.** Direct pushes to `main` are blocked (below).
+4. **That's it.** When CI passes on `main` and the version is new, `release-on-bump` tags `vX.Y.Z`
+   at the merged commit and publishes the GitHub Release. No new version ⇒ no release.
 
-```bash
-npm run start-release -- minor      # bump 0.4.0 -> 0.5.0, promote CHANGELOG, branch release/v0.5.0
-# review the CHANGELOG section — it becomes the GitHub Release notes verbatim
-npm run release                     # all gates, push, open PR, arm auto-merge
-```
-
-That is the whole release. Auto-merge lands the PR the moment the four required checks go green,
-`release-on-bump.yml` then tags `v0.5.0` at the merged commit and cuts the Release from the
-CHANGELOG section, and `publish.yml` packages (and publishes, once tokens are set).
-
-**`npm run start-release -- <patch|minor|major>`** — you pick the level; the script never chooses a
-version. It refuses unless you are on a clean `main` in sync with `origin`, then writes the new
-version to all three surfaces, rewrites `## [Unreleased]` as `## [x.y.z] — <today>` with a fresh
-empty Unreleased above it, and commits that on `release/vX.Y.Z`. Nothing is pushed.
-
-**`npm run release`** — runs, in order: the identity check, preflight (not on `main`, clean tree,
-version surfaces agree), the release-only gates when the branch bumps the version (CHANGELOG section
-exists and is non-empty, tag free, version not already on npm), then **every** gate — `npm run ci`
-(lint, conformance + branch tests, smokes), `npm run fuzz`, and `npm run coverage:strict`. Only then
-does it push the branch, open the PR, and enable auto-merge.
-
-Fuzz and coverage are **blocking here but report-only in `ci.yml`**. Locally they are fast and
-deterministic, so there is no reason to let a regression through; in CI they stay advisory until
-they have proven stable across the matrix.
-
-The script **cannot** push to `main` or merge anything — branch protection forbids both, admins
-included. It front-loads the failures; GitHub remains the authority.
-
-```bash
-npm run release:dry             # every gate, zero mutations — rehearse anything
-npm run release -- --no-auto    # open the PR but leave the merge to you
-npm run release -- --help       # full flag reference
-```
-
-### Ordinary changes vs releases
-
-A version bump *is* the release trigger, so it gets its own branch and PR:
-
-| branch | contains | merging it |
-|---|---|---|
-| `feat/…` `fix/…` `ci/…` `docs/…` | ordinary work, **never** a version change | changes nothing about releases |
-| `release/vX.Y.Z` | the bump + CHANGELOG promotion, nothing else | ships that version |
-
-`npm run release` works on both. It detects whether the branch changes the version relative to
-`origin/main` and only applies the release-only gates when it does.
-
-### Identity check
-
-More than one GitHub account can be authenticated on a dev machine, and `gh` has a single *active*
-one that is easy to leave switched after working elsewhere. Every mutating step — push, PR, merge —
-inherits it silently, so the failure is not an error but a PR opened under the wrong name.
-
-Both release scripts therefore start by asserting that all three identities resolve to the
-maintainer, and bail with the exact fix command if any has drifted:
-
-| identity | why it matters | probe |
-|---|---|---|
-| `gh` active account | who opens the PR and drives the merge | `gh api user` |
-| git `user.name` / `user.email` | who the commits are attributed to | `git config --get` |
-| SSH key GitHub sees | who the push authenticates as | `ssh -T git@github.com` |
-
-These drift independently: `gh auth switch` does not touch git config, and neither touches which key
-ssh-agent offers. Check any time with `npm run whoami`. The maintainer is named once, in
-`tools/gh-identity.js`. `SPAB_SKIP_IDENTITY=1` bypasses it (loudly).
-
-### Manual fallback
-
-Release an arbitrary commit by hand-pushing a tag:
+Manual fallback (release an arbitrary commit):
 
 ```bash
 git tag -a v0.4.0 -m "spab 0.4.0" && git push origin v0.4.0   # triggers release.yml
@@ -101,30 +41,10 @@ git tag -a v0.4.0 -m "spab 0.4.0" && git push origin v0.4.0   # triggers release
 Tags are the record of what shipped; the version bump is the *only* thing a release changes in
 source, so a release PR is small and easy to review.
 
-## Branch protection (applied)
+## Branch protection (set once)
 
 CI can *prove* a commit is good, but only branch protection can *require* that proof before merge.
-**This is live on `main` as of 2026-09-02** — applied with the script below, with signed commits off
-and `enforce_admins` on:
-
-| rule | setting |
-|---|---|
-| Pull request required | yes — **0 approvals** (GitHub forbids self-approval, so a solo maintainer self-merges) |
-| Required checks | `test (node 18)`, `test (node 20)`, `test (node 22)`, `version consistency` |
-| Branch up to date before merge | yes (`strict`) |
-| Conversation resolution | required |
-| Force pushes / deletions | blocked |
-| Applies to admins | **yes** — the owner obeys the same rules |
-| Merge methods | **squash only** (rebase and merge-commit disabled repo-wide) |
-| Auto-merge | enabled — `npm run release` arms it |
-| Signed commits | off |
-
-Because `enforce_admins` is on, `git push origin main` is rejected for the maintainer too. That is
-the point: the escape hatch is flipping the setting in Settings -> Branches, which is deliberate and
-visible rather than accidental. `release-on-bump.yml` is unaffected — it pushes a *tag*, never a
-commit to `main`.
-
-**Re-apply or change it with the script** (needs `gh` authenticated with admin on the repo):
+**Apply it with the script** (needs `gh` authenticated with admin on the repo):
 
 ```bash
 .github/scripts/setup-branch-protection.sh              # current repo, main — SOLO default (0 approvals)

@@ -40,11 +40,6 @@ npm run ci          # what CI gates on today: lint + conformance + branch tests 
 npm run bench       # robustness benchmark
 npm run survival    # raw per-carrier channel-survival experiment
 npm run gui         # serve the GUI on http://localhost:1948/pages/index.html (fetches bwcli via npx)
-
-npm run whoami          # verify gh + git + ssh all resolve to the maintainer
-npm run release:dry     # rehearse: every gate, zero mutations
-npm run release         # all gates, push branch, open PR, arm auto-merge
-npm run start-release -- <patch|minor|major>   # begin a release cycle
 ```
 
 ### Linting
@@ -77,10 +72,8 @@ stable (drop `continue-on-error` in `ci.yml`; use `coverage:strict`).
 
 - **Tests are required.** Extend `tests/roundtrip.test.js` (or add a test) for any behavior change.
   CI must be green on Node 18/20/22.
-- **Version bumps are paired.** All three surfaces must agree — `SPAB.VERSION` in `src/js/spab.js`,
-  `version` in `src/js/package.json`, and the root `package.json`. CI checks all three on every PR.
-  Use `npm run start-release -- <patch|minor|major>` rather than editing them by hand; it writes all
-  three and promotes the CHANGELOG in one step.
+- **Version bumps are paired.** If you change the codec, bump `SPAB.VERSION` in `src/js/spab.js`
+  **and** `version` in `src/js/package.json` (and the root `package.json`). CI checks they match.
   A bump merged to `main` auto-cuts the release — see [`RELEASING.md`](RELEASING.md) (and the
   branch-protection rules it documents).
 - **Changelog.** Add an entry to `CHANGELOG.md` for any user-facing change (Keep a Changelog style).
@@ -102,20 +95,13 @@ or per-release branches.
 `feat/…`, `fix/…`, `docs/…`, `test/…`, `refactor/…`, `perf/…`, `ci/…`, `chore/…`
 (e.g. `feat/zwsp-carrier`, `fix/rlnc-blank-packet`). Keep a branch to one logical change.
 
-`release/vX.Y.Z` is the one exception, and it is created for you by
-`npm run start-release`. A version bump *is* the release trigger, so it lives on its own
-branch and PR and carries nothing else. Ordinary branches never touch a version.
-
 **Commits** — [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`
 (`feat(codec): add zero-width carrier`, `fix(cli): handle EAGAIN on stdin`). This keeps history
 scannable and maps 1:1 onto the `CHANGELOG.md` sections. Write present-tense, imperative summaries.
 
 **Pull requests**
-- **`npm run release` does this for you** — it runs every gate locally (lint, tests, smokes, fuzz,
-  strict coverage), pushes the branch, opens the PR, and arms auto-merge so it lands the moment CI
-  is green. `npm run release:dry` rehearses it without touching anything.
-- Open a PR into `main`; **direct pushes to `main` are blocked** by branch protection, which is
-  live and applies to admins too (see [`RELEASING.md`](RELEASING.md)).
+- Open a PR into `main`; **direct pushes to `main` are blocked** by branch protection
+  (apply it with `.github/scripts/setup-branch-protection.sh` — see [`RELEASING.md`](RELEASING.md)).
 - CI must be green (lint, conformance + branch tests on Node 18/20/22, version-consistency) and all
   review conversations resolved; keep the branch **up to date** with `main`. Approvals: **0 for a
   solo maintainer** (self-merge on green CI — GitHub won't let you approve your own PR), **1+ for a

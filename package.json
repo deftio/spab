@@ -17,12 +17,7 @@
     "survival": "node r_and_d/symbol-survival.js --gen 3000",
     "basen": "node r_and_d/basen.js",
     "ci": "node tests/lint.js && node tests/roundtrip.test.js && node tests/branches.test.js && node r_and_d/harness.js --gen 500 --no-log && node r_and_d/symbol-survival.js --gen 500",
-    "gui": "npx --yes --package bitwrench@2 bwcli serve . --port 1948",
-
-    "whoami": "node tools/gh-identity.js",
-    "start-release": "node tools/start-release.js",
-    "release": "node tools/release.js",
-    "release:dry": "node tools/release.js --dry-run"
+    "gui": "npx --yes --package bitwrench@2 bwcli serve . --port 1948"
   },
   "//port": "1948 — the year Claude Shannon published 'A Mathematical Theory of Communication' (spab's entropy north star). Chosen to avoid the crowded 3000/8000/8080."
 }
