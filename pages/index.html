@@ -4,8 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>spab — robust text watermarking</title>
+<meta name="description" content="spab embeds a payload in the whitespace and punctuation of ordinary text, protected by error correction so it survives copy/paste, reformatting, and normalization.">
+<meta name="color-scheme" content="light dark">
+<!-- GoatCounter analytics -->
+<script data-goatcounter="https://deftio.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bitwrench@2/dist/bitwrench.umd.min.js"></script>
 <script src="../src/js/spab.js"></script>
+<!-- Shared site chrome: theme, header/nav, footer, router. See pages/site.js. -->
+<script src="./site.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -13,47 +19,10 @@
 (function () {
   "use strict";
 
-  var styles = bw.loadStyles({ primary: '#3b6ea5', secondary: '#c9633b', radius: 'lg', elevation: 'sm', spacing: 'normal' });
-  var p = styles.palette, L = styles.layout;
-
-  // ---- site styling (wide container + hero + prose + carrier viz) ----
-  bw.injectCSS(bw.css({
-    'body': { background: p.background || '#fff', color: p.dark.base, margin: '0' },
-    '.wrap': { maxWidth: '1180px', margin: '0 auto', padding: '0 28px' },
-    '.nav': { borderBottom: '1px solid ' + p.light.border, background: p.surface, position: 'sticky', top: '0', zIndex: '10' },
-    '.nav .wrap': { display: 'flex', alignItems: 'center', gap: '8px', height: '58px' },
-    '.brand': { fontWeight: '800', fontSize: '20px', color: p.primary.base, textDecoration: 'none', marginRight: 'auto', letterSpacing: '-.01em' },
-    '.navlink': { color: p.dark.base, textDecoration: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '14px' },
-    '.navlink:hover': { background: p.primary.light },
-    '.navlink.active': { color: p.primary.base, fontWeight: '700' },
-    '.hero': { background: 'linear-gradient(135deg,' + p.primary.base + ',' + p.secondary.base + ')', color: '#fff', padding: '64px 0 56px' },
-    '.hero h1': { fontSize: '44px', margin: '0 0 10px', letterSpacing: '-.02em', lineHeight: '1.05' },
-    '.hero p': { fontSize: '19px', opacity: '.94', maxWidth: '660px', margin: '0 0 24px' },
-    '.hero .btns a': { display: 'inline-block', textDecoration: 'none', padding: '12px 22px', borderRadius: '10px', fontWeight: '700', marginRight: '12px' },
-    '.btn-solid': { background: '#fff', color: p.primary.base },
-    '.btn-ghost': { border: '1.5px solid rgba(255,255,255,.7)', color: '#fff' },
-    '.section': { padding: '44px 0' },
-    '.section h2': { fontSize: '27px', margin: '0 0 6px', letterSpacing: '-.01em' },
-    '.lede': { color: p.dark.base, opacity: '.72', fontSize: '17px', maxWidth: '720px', marginTop: '0' },
-    '.prose': { fontSize: '16px', lineHeight: '1.7', maxWidth: '760px' },
-    '.prose code': { background: p.surface, border: '1px solid ' + p.light.border, borderRadius: '5px', padding: '1px 6px', fontSize: '14px' },
-    '.grid3': { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '18px' },
-    '.grid2': { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px' },
-    '.intgrid': { display: 'grid', gridTemplateColumns: '260px 1fr', gap: '24px', alignItems: 'start' },
-    '@media (max-width: 820px)': { '.grid3': { gridTemplateColumns: '1fr' }, '.grid2': { gridTemplateColumns: '1fr' }, '.intgrid': { gridTemplateColumns: '1fr' }, '.hero h1': { fontSize: '34px' } },
-    'table.t': { width: '100%', borderCollapse: 'collapse', fontSize: '14px', margin: '10px 0' },
-    'table.t th, table.t td': { textAlign: 'left', padding: '8px 10px', borderBottom: '1px solid ' + p.light.border },
-    'table.t th': { color: p.dark.base, opacity: '.65', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '.04em' },
-    'pre.code': { background: p.dark.base, color: '#e7edf3', padding: '14px 16px', borderRadius: '10px', overflowX: 'auto', fontSize: '13px', lineHeight: '1.55' },
-    '.foot': { borderTop: '1px solid ' + p.light.border, color: p.dark.base, opacity: '.6', fontSize: '13px', padding: '26px 0', marginTop: '20px' },
-    // carrier visualization (test page)
-    '.spab-view': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: '13px', lineHeight: '2', background: p.surface, border: '1px solid ' + p.light.border, borderRadius: L.radius.card, padding: L.spacing.card, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '230px', overflow: 'auto' },
-    '.slot': { display: 'inline-block', minWidth: '13px', height: '15px', lineHeight: '15px', textAlign: 'center', borderRadius: '3px', color: '#fff', fontSize: '10px', verticalAlign: 'middle', margin: '0 1px' },
-    '.v0': { background: '#9aa4b0' }, '.v1': { background: '#4a86c8' }, '.v2': { background: '#3fa564' }, '.v3': { background: '#d98a3d' },
-    '.pmark': { background: p.secondary.base, color: '#fff', borderRadius: '3px', padding: '0 2px' },
-    '.metawrap': { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' },
-    '.chipwrap': { display: 'flex', flexWrap: 'wrap', gap: '8px' }
-  }));
+  // The theme is generated by site.js at load time, so the palette is available
+  // here while the view functions below are being defined.
+  var p = SPABSite.palette;
+  var S = SPABSite.section;
 
   // ================= shared helpers =================
   function tt(headers, rows) {
@@ -62,7 +31,12 @@
       { t: 'tbody', c: rows.map(function (r) { return { t: 'tr', c: r.map(function (cell) { return { t: 'td', c: cell }; }) }; }) }
     ] };
   }
-  function badge(text, v) { return { t: 'span', a: { class: 'bw_badge ' + (v || '') }, c: text }; }
+  // Real component rather than a hand-written class: the 1.x-era `bw_badge` class
+  // has no rules in bitwrench 2.x (they are BCCL-prefixed), so these used to
+  // render as unstyled, run-together text.
+  function badge(text, v) {
+    return bw.makeBadge({ text: text, variant: (v || 'light').replace(/^bw_/, '') });
+  }
 
   // ================= TEST PAGE (the playground) =================
   var SAMPLE = "It's a well-known, old-fashioned truth that the co-operative fox-trot isn't easily forgotten. " +
@@ -178,7 +152,7 @@
     if (st.showCarriers) {
       bw.DOM('#markerView', { t: 'div', a: { class: 'spab-view' }, c: bw.raw(markerHTML(st.wm)) });
     } else {
-      bw.DOM('#markerView', { t: 'textarea', a: { class: 'bw_form_control spab-view', spellcheck: 'false', rows: 8,
+      bw.DOM('#markerView', { t: 'textarea', a: { class: 'bw_bccl_form_control spab-view', spellcheck: 'false', rows: 14,
         oninput: function (e) { st.wm = e.target.value; runDecode(); renderStats(); } }, c: st.wm || '' });
     }
   }
@@ -225,115 +199,328 @@
   }
   function initTest() { renderAttacks(); renderCarrierRow(); doEncode(); }
 
-  function checkbox(label, checked, onchange) {
-    return { t: 'label', a: { style: bw.s({ display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '14px', cursor: 'pointer' }) }, c: [{ t: 'input', a: { type: 'checkbox', checked: checked, onchange: onchange } }, label] };
-  }
-  function field(label, control) { return { t: 'div', a: { style: bw.s({ marginBottom: '10px' }) }, c: [{ t: 'label', a: { style: bw.s({ fontSize: '12px', color: p.dark.base, opacity: '.65' }) }, c: label }, control] }; }
+  // makeCheckbox wires the label to the input by id, so clicking the text toggles
+  // it. Each needs a unique id; a counter is enough for a single page.
+  // Attach an event handler to a component that exposes no prop for it
+  // (makeTextarea/makeSelect take no oninput/onchange). Returns the same node.
+  function control(node, evt, fn) { node.a = node.a || {}; node.a[evt] = fn; return node; }
 
+  var _cbId = 0;
+  function checkbox(label, checked, onchange) {
+    _cbId += 1;
+    var box = bw.makeCheckbox({ label: label, checked: checked, id: 'spab-cb-' + _cbId });
+    // makeCheckbox has no onchange prop, so attach it to the input child it built.
+    box.c[0].a.onchange = onchange;
+    return { t: 'div', a: { style: bw.s({ display: 'inline-block', marginRight: '16px' }) }, c: box };
+  }
+
+  // makeFormGroup renders the label as a block above its control. The old
+  // hand-rolled version emitted an inline <label> next to the input, which is why
+  // "Cover text" and "Message" sat on top of their own fields.
+  function field(label, control) {
+    return bw.makeFormGroup({ label: label, input: control });
+  }
+
+  // ================= PLAYGROUND =================
+  //
+  // Same instrument as before, laid out as a numbered flow: the two halves of a
+  // round trip side by side, then what you do to the text, then what came back.
   function testView() {
-    return { t: 'div', a: { class: 'wrap section', id: 'testroot' }, o: { mounted: function () { setTimeout(initTest, 0); } }, c: [
-      { t: 'h2', c: 'Live playground' },
-      { t: 'p', a: { class: 'lede' }, c: 'Encode a message, choose carriers and ECC, then attack the text and watch it decode. Runs the real library in your browser.' },
-      { t: 'div', a: { class: 'grid2', style: bw.s({ marginTop: '18px' }) }, c: [
-        bw.makeCard({ title: '1 · Encode', content: { t: 'div', c: [
-          field('Cover text', { t: 'textarea', a: { class: 'bw_form_control', rows: 6, oninput: function (e) { st.cover = e.target.value; } }, c: st.cover }),
-          field('Message', { t: 'input', a: { class: 'bw_form_control', type: 'text', value: st.msg, oninput: function (e) { st.msg = e.target.value; } } }),
-          field('Method', { t: 'select', a: { class: 'bw_form_control', onchange: function (e) { st.method = e.target.value; renderCarrierRow(); doEncode(); } },
-            c: Object.keys(METHODS).map(function (m) { return { t: 'option', a: { value: m }, c: METHODS[m].label }; }) }),
-          { t: 'div', a: { style: bw.s({ display: 'flex', gap: '18px', flexWrap: 'wrap', alignItems: 'flex-end' }) }, c: [
-            field('Carriers', { t: 'div', a: { id: 'carrierRow' } }),
-            field('ECC', { t: 'select', a: { class: 'bw_form_control', style: bw.s({ width: 'auto' }), onchange: function (e) { st.ecc = e.target.value; doEncode(); } }, c: [{ t: 'option', a: { value: 'repetition' }, c: 'repetition' }, { t: 'option', a: { value: 'rlnc' }, c: 'RLNC fountain' }] }),
-            field('Scramble key (optional)', { t: 'input', a: { class: 'bw_form_control', type: 'text', placeholder: 'none', value: st.key, style: bw.s({ width: '150px' }), oninput: function (e) { st.key = e.target.value; doEncode(); } } })
-          ] },
-          { t: 'div', a: { style: bw.s({ marginTop: '8px' }) }, c: bw.makeButton({ text: 'Encode ▶', variant: 'primary', onclick: doEncode }) },
-          { t: 'div', a: { id: 'encMeta', style: bw.s({ marginTop: '14px' }) } },
-          { t: 'div', a: { id: 'statsPanel' } }
-        ] } }),
-        bw.makeCard({ title: '2 · Watermarked text', content: { t: 'div', c: [
-          checkbox('show carriers', st.showCarriers, function (e) { st.showCarriers = e.target.checked; updateMarker(); }),
-          { t: 'span', a: { style: bw.s({ fontSize: '12px', opacity: '.6' }) }, c: 'edit the text below to see decode survive your changes' },
-          { t: 'div', a: { id: 'markerView', style: bw.s({ marginTop: '8px' }) } },
-          { t: 'div', a: { style: bw.s({ marginTop: '10px', display: 'flex', gap: '8px' }) }, c: [
-            bw.makeButton({ text: 'Copy', variant: 'outline-secondary', size: 'sm', onclick: function () { if (st.wm && navigator.clipboard) navigator.clipboard.writeText(st.wm); } }),
-            bw.makeButton({ text: 'Reset to encoded', variant: 'light', size: 'sm', onclick: function () { st.wm = st._encoded; updateMarker(); renderStats(); runDecode(); } })
-          ] }
-        ] } })
-      ] },
-      bw.makeCard({ title: '3 · Channel attacks', content: { t: 'div', c: [
-        { t: 'p', a: { style: bw.s({ opacity: '.7', fontSize: '13px', marginTop: '0' }) }, c: 'Applied before decoding. Click to toggle; sliders set intensity.' },
-        { t: 'div', a: { id: 'attackRow' } }, { t: 'div', a: { id: 'sliderRow' } }
-      ] } }),
-      bw.makeCard({ title: '4 · Decode', content: { t: 'div', a: { id: 'decResult' } } })
+    return { t: 'div', a: { id: 'testroot' }, o: { mounted: function () { setTimeout(initTest, 0); } }, c: [
+      S({
+        eyebrow: 'Live',
+        title: 'Playground',
+        lede: 'Encode a message, choose carriers and ECC, then attack the text and watch it decode. This runs the real library in your browser — nothing is sent anywhere.',
+        content: { t: 'div', a: { class: 'grid2' }, c: [
+
+          bw.makeCard({ title: '1 · Encode', shadow: 'sm', content: { t: 'div', c: [
+            field('Cover text', control(bw.makeTextarea({ rows: 6, value: st.cover }), 'oninput', function (e) { st.cover = e.target.value; })),
+            field('Message', bw.makeInput({ type: 'text', value: st.msg, oninput: function (e) { st.msg = e.target.value; } })),
+            field('Method', control(bw.makeSelect({ options: Object.keys(METHODS).map(function (m) { return { value: m, text: METHODS[m].label }; }) }),
+              'onchange', function (e) { st.method = e.target.value; renderCarrierRow(); doEncode(); })),
+            { t: 'div', a: { class: 'grid3', style: bw.s({ gap: '14px', alignItems: 'flex-end' }) }, c: [
+              field('Carriers', { t: 'div', a: { id: 'carrierRow' } }),
+              field('ECC', control(bw.makeSelect({ options: [{ value: 'repetition', text: 'repetition' }, { value: 'rlnc', text: 'RLNC fountain' }] }),
+                'onchange', function (e) { st.ecc = e.target.value; doEncode(); })),
+              field('Scramble key (optional)', bw.makeInput({ type: 'text', placeholder: 'none', value: st.key, oninput: function (e) { st.key = e.target.value; doEncode(); } }))
+            ] },
+            { t: 'div', a: { style: bw.s({ marginTop: '14px' }) }, c: bw.makeButton({ text: 'Encode ▶', variant: 'primary', onclick: doEncode }) },
+            { t: 'div', a: { id: 'encMeta', style: bw.s({ marginTop: '16px' }) } },
+            { t: 'div', a: { id: 'statsPanel' } }
+          ] } }),
+
+          bw.makeCard({ title: '2 · Watermarked text', shadow: 'sm', content: { t: 'div', c: [
+            { t: 'div', a: { style: bw.s({ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }) }, c: [
+              checkbox('show carriers', st.showCarriers, function (e) { st.showCarriers = e.target.checked; updateMarker(); }),
+              { t: 'span', a: { style: bw.s({ fontSize: '12.5px', opacity: '.6' }) }, c: 'edit the text below — decode survives your changes' }
+            ] },
+            { t: 'div', a: { id: 'markerView' } },
+            { t: 'div', a: { style: bw.s({ marginTop: '12px', display: 'flex', gap: '8px' }) }, c: [
+              bw.makeButton({ text: 'Copy', variant: 'outline-secondary', size: 'sm', onclick: function () { if (st.wm && navigator.clipboard) navigator.clipboard.writeText(st.wm); } }),
+              bw.makeButton({ text: 'Reset to encoded', variant: 'light', size: 'sm', onclick: function () { st.wm = st._encoded; updateMarker(); renderStats(); runDecode(); } })
+            ] }
+          ] } })
+        ] }
+      }),
+
+      S({
+        tight: true,
+        content: { t: 'div', a: { class: 'grid2' }, c: [
+          bw.makeCard({ title: '3 · Channel attacks', shadow: 'sm', content: { t: 'div', c: [
+            { t: 'p', a: { style: bw.s({ opacity: '.7', fontSize: '13.5px', marginTop: '0' }) }, c: 'Applied before decoding. Click to toggle; sliders set intensity.' },
+            { t: 'div', a: { id: 'attackRow' } },
+            { t: 'div', a: { id: 'sliderRow' } }
+          ] } }),
+          bw.makeCard({ title: '4 · Decode', shadow: 'sm', content: { t: 'div', a: { id: 'decResult' } } })
+        ] }
+      })
     ] };
   }
 
   // ================= HOME =================
-  function feature(title, body) { return bw.makeCard({ title: title, content: { t: 'p', a: { class: 'prose', style: bw.s({ margin: '0' }) }, c: body } }); }
+
+  // ================= FRONT-PAGE TRY IT =================
+  //
+  // The simple version, on purpose: your text, your secret, a copyable result, and
+  // recovery in the other direction. No carriers, no ECC choice, no attack sliders
+  // — that is what /test is for. Anything that would make a first-time visitor
+  // choose something before seeing it work has been left out.
+  var TRY_PARAMS = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
+
+  var TRY_SAMPLE = 'Every document you send carries more than its words. The spacing between them, ' +
+    'the shape of a quote, the kind of dash you chose - these are choices a reader never notices, ' +
+    'and they are choices you can make on purpose. Paste your own paragraph here, pick a secret, ' +
+    'and watch it travel with the text wherever it is copied.';
+
+  var tr = { cover: TRY_SAMPLE, secret: 'acme-42', out: '', note: null, kind: 'info', paste: '', found: undefined };
+
+  function paintTryNote() {
+    bw.DOM('#tryNote', tr.note ? bw.makeAlert({ variant: tr.kind, content: bw.raw(tr.note) }) : { t: 'span' });
+  }
+
+  function paintTryOut() {
+    bw.DOM('#tryOut', { t: 'textarea', a: { class: 'bw_bccl_form_control tryout', rows: 6,
+      readonly: 'readonly', spellcheck: 'false' }, c: tr.out });
+  }
+
+  function doWatermark() {
+    var res;
+    try {
+      res = SPAB.encode(tr.cover, tr.secret, TRY_PARAMS);
+    } catch (e) {
+      tr.out = ''; tr.note = 'Could not watermark this text: ' + bw.escapeHTML(e.message); tr.kind = 'danger';
+      paintTryOut(); paintTryNote(); return;
+    }
+    var md = res.metadata;
+    tr.out = res.text;
+
+    // Verify by decoding what we just produced, rather than trusting the encode.
+    // A passage can be too short to hold the secret, and spab says so in its
+    // metadata instead of failing — so the honest thing is to check and explain.
+    var back = SPAB.decode(res.text, TRY_PARAMS);
+    if (back.message === tr.secret) {
+      tr.kind = 'success';
+      tr.note = '<b>Hidden.</b> ' + md.payloadBytes + ' bytes carried ' + md.reps +
+        '\u00d7 over ' + md.slots + ' sites. The text below reads the same — copy it anywhere.';
+    } else {
+      tr.kind = 'warning';
+      tr.note = '<b>This passage is too short for that secret.</b> It needs ' + md.frameBits +
+        ' bits and the best channel holds ' + md.capacityBits +
+        '. Add a sentence or two, or use a shorter secret.';
+    }
+    paintTryOut(); paintTryNote();
+  }
+
+  function doRecover() {
+    var d;
+    try {
+      d = SPAB.decode(tr.paste, TRY_PARAMS);
+    } catch (e) {
+      d = { message: null };
+    }
+    tr.found = d.message;
+    bw.DOM('#recOut', tr.found
+      ? { t: 'div', a: { class: 'recovered' }, c: [
+          bw.makeBadge({ text: 'recovered', variant: 'success' }),
+          { t: 'b', c: tr.found }
+        ] }
+      : { t: 'div', a: { class: 'recovered' }, c: [
+          bw.makeBadge({ text: 'nothing found', variant: 'light' }),
+          { t: 'span', a: { style: bw.s({ opacity: '.7', fontSize: '14px' }) },
+            c: 'No watermark in that text — or it was stripped.' }
+        ] });
+  }
+
+  function tryView() {
+    return S({
+      eyebrow: 'Try it',
+      title: 'Watermark a paragraph',
+      lede: 'Your text, your secret. The watermarked copy reads the same — paste it anywhere, then recover the secret from it.',
+      content: { t: 'div', a: { class: 'grid2' }, c: [
+
+        bw.makeCard({ title: 'Hide a secret', shadow: 'sm', content: { t: 'div', c: [
+          field('Your text', control(bw.makeTextarea({ rows: 6, value: tr.cover }),
+            'oninput', function (e) { tr.cover = e.target.value; })),
+          field('Your secret', bw.makeInput({ type: 'text', value: tr.secret,
+            oninput: function (e) { tr.secret = e.target.value; } })),
+          { t: 'div', c: bw.makeButton({ text: 'Watermark it →', variant: 'primary', onclick: doWatermark }) },
+          { t: 'div', a: { id: 'tryNote', style: bw.s({ marginTop: '14px' }) } },
+          { t: 'div', a: { id: 'tryOut', style: bw.s({ marginTop: '10px' }) } },
+          { t: 'div', a: { style: bw.s({ marginTop: '10px' }) }, c: bw.makeButton({
+            text: 'Copy watermarked text', variant: 'outline-secondary', size: 'sm',
+            onclick: function () { if (tr.out && navigator.clipboard) navigator.clipboard.writeText(tr.out); } }) }
+        ] } }),
+
+        bw.makeCard({ title: 'Recover a secret', shadow: 'sm', content: { t: 'div', c: [
+          field('Paste watermarked text', control(bw.makeTextarea({ rows: 6, placeholder: 'Paste text here…' }),
+            'oninput', function (e) { tr.paste = e.target.value; })),
+          { t: 'div', c: bw.makeButton({ text: 'Recover →', variant: 'primary', onclick: doRecover }) },
+          { t: 'div', a: { id: 'recOut' } },
+          { t: 'p', a: { style: bw.s({ marginTop: '16px', fontSize: '13.5px', opacity: '.7' }) },
+            c: 'Copy the result from the left, paste it here, and it comes back. Edit a few words first — it still comes back.' }
+        ] } })
+      ] }
+    });
+  }
+
+  // ================= HOME =================
+
+  function heroView() {
+    return { t: 'section', a: { class: 'hero' }, c: { t: 'div', a: { class: 'wrap' }, c: [
+      { t: 'p', a: { class: 'eyebrow' }, c: 'Robust text watermarking' },
+      { t: 'h1', c: 'Watermark your text. Invisibly.' },
+      { t: 'p', a: { class: 'lede' }, c: bw.raw(
+        'spab hides a payload — a serial, a hash, JSON — in choices ordinary text already makes: ' +
+        'which space, which quote, which dash. The words read identically, and error correction ' +
+        'carries the mark through copy/paste, reformatting, and normalization.') },
+      { t: 'div', a: { class: 'btns' }, c: [
+        bw.makeButton({ text: 'Try the live demo →', variant: 'light', size: 'lg',
+          onclick: function () { bw.navigate('/test'); } }),
+        bw.makeButton({ text: 'How it works', variant: 'outline-light', size: 'lg',
+          onclick: function () { bw.navigate('/how'); } })
+      ] }
+    ] } };
+  }
+
   function homeView() {
     return { t: 'div', c: [
-      { t: 'div', a: { class: 'hero' }, c: { t: 'div', a: { class: 'wrap' }, c: [
-        { t: 'h1', c: 'Hide a message in the whitespace of text.' },
-        { t: 'p', c: 'spab is a small, dependency-free library that embeds an arbitrary payload — a serial, a hash, JSON, even a tiny program — into the spaces and punctuation of ordinary text, protected by error correction so it survives copy/paste, reformatting, and normalization. The text reads identically; the signal lives in choices a reader never notices.' },
-        { t: 'div', a: { class: 'btns' }, c: [
-          { t: 'a', a: { href: '#/test', class: 'btn-solid' }, c: 'Try the live demo →' },
-          { t: 'a', a: { href: '#/how', class: 'btn-ghost' }, c: 'How it works' }
+      heroView(),
+
+      SPABSite.install(),
+
+      { t: 'div', o: { mounted: function () { setTimeout(doWatermark, 0); } }, c: tryView() },
+
+      S({
+        tight: true,
+        content: { t: 'div', a: { class: 'grid3' }, c: [
+          bw.makeStatCard({ value: '0', label: 'runtime dependencies' }),
+          bw.makeStatCard({ value: '100%', label: 'branch coverage' }),
+          bw.makeStatCard({ value: '2', label: 'ECC modes — repetition + RLNC' })
         ] }
-      ] } },
-      { t: 'div', a: { class: 'wrap section' }, c: [
-        { t: 'div', a: { class: 'grid3' }, c: [
-          feature('Robust, not fragile', 'Multiple carrier channels + error correction. Whitespace and confusables fail on different edits, so the payload survives when one channel is wiped.'),
-          feature('Invisible where it counts', 'Renders identically in browsers, docs, chat, and PDFs. The mark is which space or which quote — not what the words say.'),
-          feature('Zero dependencies', 'A hand-rolled codec, GF(256) fountain, and framing — no third-party packages. One reference in JavaScript, more language ports on the way.')
-        ] },
-        { t: 'div', a: { style: bw.s({ marginTop: '34px' }) }, c: [
-          { t: 'h2', c: 'The idea in one line' },
+      }),
+
+      S({
+        eyebrow: 'Why it holds up',
+        title: 'Robustness by construction',
+        content: bw.makeFeatureGrid({
+          columns: 3,
+          centered: false,
+          features: [
+            // NB: the prop is `description` — `desc` is silently dropped.
+            // Icons are text-presentation glyphs on purpose: an emoji-presentation
+            // character (👁) renders as a color emoji next to monochrome siblings.
+            { icon: '◈', title: 'Robust, not fragile',
+              description: 'Multiple carrier channels plus error correction. Whitespace and confusables fail on different edits, so the payload survives when one channel is wiped.' },
+            { icon: '◉', title: 'Invisible where it counts',
+              description: 'Renders identically in browsers, docs, chat, and PDFs. The mark is which space or which quote — not what the words say.' },
+            { icon: '◇', title: 'Zero dependencies',
+              description: 'A hand-rolled codec, GF(256) fountain, and framing — no third-party packages. One reference in JavaScript, more language ports on the way.' }
+          ]
+        })
+      }),
+
+      S({
+        eyebrow: 'The idea',
+        title: 'In one line',
+        content: { t: 'div', c: [
           { t: 'p', a: { class: 'prose' }, c: bw.raw('Text carries <b>spare entropy</b> — equivalent choices a reader won\'t notice (which space, which dash, straight vs. curly quote). spab measures that latent capacity, spends some on signal, and keeps enough margin (redundancy + ECC) to survive the channel. It\'s information-entropy management, applied to plain text.') },
-          { t: 'div', a: { style: bw.s({ marginTop: '16px' }) }, c: { t: 'a', a: { href: '#/test', class: 'navlink', style: bw.s({ background: p.primary.light, color: p.primary.base, fontWeight: '700', padding: '10px 16px' }) }, c: 'Open the interactive playground →' } }
+          { t: 'div', a: { style: bw.s({ marginTop: '26px' }) }, c: bw.makeCTA({
+            title: 'See it survive an attack',
+            description: 'Encode a message, then normalize, strip, or cut the text and watch which channel carries it through.',
+            actions: [bw.makeButton({ text: 'Open the playground →', variant: 'primary', onclick: function () { bw.navigate('/test'); } })]
+          }) }
         ] }
-      ] }
+      })
     ] };
   }
 
   // ================= HOW IT WORKS =================
   function howView() {
-    return { t: 'div', a: { class: 'wrap section' }, c: [
-      { t: 'h2', c: 'How spab works' },
-      { t: 'p', a: { class: 'lede' }, c: 'A quick tour of the carriers, the parallel-channel design, error correction, and — honestly — the limits.' },
+    return { t: 'div', c: [
+      S({
+        eyebrow: 'Reference',
+        title: 'How spab works',
+        lede: 'A quick tour of the carriers, the parallel-channel design, error correction, and — honestly — the limits.',
+        content: { t: 'div', c: [
+          { t: 'h3', c: 'Carriers: whitespace + confusables' },
+          { t: 'p', a: { class: 'prose' }, c: bw.raw('spab writes bits by substituting characters that look the same but differ in code point. Two classes are on by default, chosen from measurement:') },
+          tt(['Carrier', 'Choice (bit 0 / 1)', 'Bits/site', 'Survives NFKC?'], [
+            ['whitespace', 'space / thin / hair / six-per-em', '2', bw.raw('<b style="color:' + p.danger.base + '">no</b> — collapses to a plain space')],
+            ['apostrophe', bw.raw("straight <code>'</code> / curly <code>&#8217;</code>"), '1', bw.raw('<b style="color:' + p.success.base + '">yes</b>')],
+            ['hyphen', bw.raw('hyphen-minus / Unicode hyphen'), '1', bw.raw('<b style="color:' + p.success.base + '">yes</b>')]
+          ]),
+          { t: 'p', a: { class: 'prose' }, c: bw.raw('The key insight: <b>NFKC normalization</b> (common in databases, forms, and search) erases every whitespace variant, but the confusables survive it — while a "smart-quote" autocorrect erases the apostrophe channel but leaves whitespace. They fail on <i>different</i> channels.') }
+        ] }
+      }),
 
-      { t: 'h3', c: 'Carriers: whitespace + confusables' },
-      { t: 'p', a: { class: 'prose' }, c: bw.raw('spab writes bits by substituting characters that look the same but differ in code point. Two classes are on by default, chosen from measurement:') },
-      tt(['Carrier', 'Choice (bit 0 / 1)', 'Bits/site', 'Survives NFKC?'], [
-        ['whitespace', 'space / thin / hair / six-per-em', '2', bw.raw('<b style="color:#cc4433">no</b> — collapses to a plain space')],
-        ['apostrophe', bw.raw("straight <code>'</code> / curly <code>&#8217;</code>"), '1', bw.raw('<b style="color:#2e9e5b">yes</b>')],
-        ['hyphen', bw.raw('hyphen-minus / Unicode hyphen'), '1', bw.raw('<b style="color:#2e9e5b">yes</b>')]
-      ]),
-      { t: 'p', a: { class: 'prose' }, c: bw.raw('The key insight: <b>NFKC normalization</b> (common in databases, forms, and search) erases every whitespace variant, but the confusables survive it — while a "smart-quote" autocorrect erases the apostrophe channel but leaves whitespace. They fail on <i>different</i> channels.') },
+      S({
+        tight: true,
+        title: 'Parallel channels',
+        content: { t: 'div', c: [
+          { t: 'p', a: { class: 'prose' }, c: 'Each carrier is an independent channel that carries the whole payload. Decode returns whichever channel survived — so an edit that kills one leaves the others intact:' },
+          tt(['Attack', 'whitespace-only', 'default (multi-carrier)'], [
+            ['clean', '✓', bw.raw('✓ <span style="opacity:.6">via whitespace</span>')],
+            ['NFKC normalize', bw.raw('<b style="color:' + p.danger.base + '">FAIL</b>'), bw.raw('✓ <span style="opacity:.6">via apostrophe</span>')],
+            ['smart-quote autocorrect', '✓', bw.raw('✓ <span style="opacity:.6">via whitespace</span>')],
+            ['strip whitespace', bw.raw('<b style="color:' + p.danger.base + '">FAIL</b>'), bw.raw('✓ <span style="opacity:.6">via apostrophe</span>')]
+          ])
+        ] }
+      }),
 
-      { t: 'h3', c: 'Parallel channels' },
-      { t: 'p', a: { class: 'prose' }, c: 'Each carrier is an independent channel that carries the whole payload. Decode returns whichever channel survived — so an edit that kills one leaves the others intact:' },
-      tt(['Attack', 'whitespace-only', 'default (multi-carrier)'], [
-        ['clean', '✓', bw.raw('✓ <span style="opacity:.6">via whitespace</span>')],
-        ['NFKC normalize', bw.raw('<b style="color:#cc4433">FAIL</b>'), bw.raw('✓ <span style="opacity:.6">via apostrophe</span>')],
-        ['smart-quote autocorrect', '✓', bw.raw('✓ <span style="opacity:.6">via whitespace</span>')],
-        ['strip whitespace', bw.raw('<b style="color:#cc4433">FAIL</b>'), bw.raw('✓ <span style="opacity:.6">via apostrophe</span>')]
-      ]),
+      S({
+        tight: true,
+        title: 'Under the hood',
+        content: bw.makeAccordion({
+          items: [
+            { title: 'Error correction',
+              content: bw.raw('Two ECC modes. <b>Repetition</b> (default) writes the framed payload many times and majority-votes per bit — strong when a channel is dense. <b>RLNC fountain</b> (a from-scratch GF(256) random-linear code) breaks the payload into self-checking, self-locating packets that <i>pool across all channels</i>, so surviving carriers reconstruct the whole message. Both are dependency-free.') },
+            { title: 'Symbol packing (no wasted bits)',
+              content: bw.raw('Between the ECC bit stream and the carrier glyphs sits one <b>mixed-radix symbol layer</b>. A carrier with <i>N</i> equivalent glyphs per site holds log<sub>2</sub><i>N</i> bits — often fractional (a 3-way choice is 1.585 bits, not 1). Rather than round down at every site and throw those fractions away, spab packs the bit stream into the sites by base conversion, in <b>bounded blocks</b> so a damaged symbol only affects its block (never the whole message). Every carrier — even the power-of-two ones — flows through the same layer.') },
+            { title: 'Optional keyed scramble',
+              content: bw.raw('Pass a <b>key</b> and the symbol stream is <b>whitened</b> (a key-derived pseudo-random value is added to each symbol, flattening the carrier statistics) and <b>interleaved</b> (a key-derived permutation spreads burst damage across blocks and hides the order). Right key decodes; wrong or missing key does not. This is <i>keyed</i> — cryptography, not a hidden constant — but it is a <b>cost multiplier, not confidentiality</b>: real secrecy will come from the planned authenticated cipher.') },
+            { title: 'Capacity vs. robustness',
+              content: bw.raw('More redundancy = more survivable, less payload. A short passage holds a tiny serial ultra-redundantly; a long document holds a hash, JSON, or an easter-egg program. Match payload size to text length, then spend the rest on redundancy.') }
+          ]
+        })
+      }),
 
-      { t: 'h3', c: 'Error correction' },
-      { t: 'p', a: { class: 'prose' }, c: bw.raw('Two ECC modes. <b>Repetition</b> (default) writes the framed payload many times and majority-votes per bit — strong when a channel is dense. <b>RLNC fountain</b> (a from-scratch GF(256) random-linear code) breaks the payload into self-checking, self-locating packets that <i>pool across all channels</i>, so surviving carriers reconstruct the whole message. Both are dependency-free.') },
+      S({
+        tight: true,
+        title: 'What it is not',
+        content: { t: 'div', a: { style: bw.s({ maxWidth: '820px' }) }, c: bw.makeAlert({
+          variant: 'warning',
+          content: bw.raw('spab targets <b>incidental</b> robustness — ordinary editing, copy/paste, reformatting. It does <b>not</b> defeat a determined stripper: anyone who knows the carrier set can remove it, and fully rewriting the text removes it entirely. The design raises that cost and makes stripping detectable, but never claims to be unbreakable.')
+        }) }
+      }),
 
-      { t: 'h3', c: 'Symbol packing (no wasted bits)' },
-      { t: 'p', a: { class: 'prose' }, c: bw.raw('Between the ECC bit stream and the carrier glyphs sits one <b>mixed-radix symbol layer</b>. A carrier with <i>N</i> equivalent glyphs per site holds log<sub>2</sub><i>N</i> bits — often fractional (a 3-way choice is 1.585 bits, not 1). Rather than round down at every site and throw those fractions away, spab packs the bit stream into the sites by base conversion, in <b>bounded blocks</b> so a damaged symbol only affects its block (never the whole message). Every carrier — even the power-of-two ones — flows through the same layer.') },
-
-      { t: 'h3', c: 'Optional keyed scramble' },
-      { t: 'p', a: { class: 'prose' }, c: bw.raw('Pass a <b>key</b> and the symbol stream is <b>whitened</b> (a key-derived pseudo-random value is added to each symbol, flattening the carrier statistics) and <b>interleaved</b> (a key-derived permutation spreads burst damage across blocks and hides the order). Right key decodes; wrong or missing key does not. This is <i>keyed</i> — cryptography, not a hidden constant — but it is a <b>cost multiplier, not confidentiality</b>: real secrecy will come from the planned authenticated cipher. Leftover capacity beyond the payload is filled with the neutral default symbol, so a short message in a long passage still reads naturally.') },
-
-      { t: 'h3', c: 'Capacity vs. robustness' },
-      { t: 'p', a: { class: 'prose' }, c: bw.raw('More redundancy = more survivable, less payload. A short passage holds a tiny serial ultra-redundantly; a long document holds a hash, JSON, or an easter-egg program. Match payload size to text length, then spend the rest on redundancy.') },
-
-      { t: 'h3', c: 'What it is not' },
-      { t: 'div', a: { style: bw.s({ maxWidth: '760px' }) }, c: bw.makeAlert ? bw.makeAlert({ variant: 'warning', content: bw.raw('spab targets <b>incidental</b> robustness — ordinary editing, copy/paste, reformatting. It does <b>not</b> defeat a determined stripper: anyone who knows the carrier set can remove it, and fully rewriting the text removes it entirely. The design raises that cost and makes stripping detectable, but never claims to be unbreakable.') }) : { t: 'p', a: { class: 'prose' }, c: 'spab targets incidental robustness, not defeat of a determined adversary.' } },
-
-      { t: 'div', a: { style: bw.s({ marginTop: '20px' }) }, c: { t: 'a', a: { href: '#/test', class: 'navlink', style: bw.s({ background: p.primary.light, color: p.primary.base, fontWeight: '700', padding: '10px 16px' }) }, c: 'See it live in the playground →' } }
+      S({
+        tight: true,
+        content: bw.makeCTA({
+          title: 'See it live',
+          description: 'Every claim on this page is testable in the browser.',
+          actions: [bw.makeButton({ text: 'Open the playground →', variant: 'primary', onclick: function () { bw.navigate('/test'); } })]
+        })
+      })
     ] };
   }
 
@@ -427,34 +614,19 @@
     ] };
   }
 
-  // ================= shell + router =================
-  var NAV = [['#/', 'Home'], ['#/how', 'How it works'], ['#/test', 'Playground'], ['#/libraries', 'Libraries']];
-  var GITHUB_URL = 'https://github.com/deftio/spab';
-  function navbar(active) {
-    return { t: 'div', a: { class: 'nav' }, c: { t: 'div', a: { class: 'wrap' }, c: [
-      { t: 'a', a: { href: '#/', class: 'brand' }, c: 'spab' }
-    ].concat(NAV.map(function (n) { return { t: 'a', a: { href: n[0], class: 'navlink' + (('#' + active) === n[0] || (active === '/' && n[0] === '#/') ? ' active' : '') }, c: n[1] }; }))
-      .concat([{ t: 'a', a: { href: GITHUB_URL, class: 'navlink', target: '_blank', rel: 'noopener',
-        style: bw.s({ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px' }) },
-        c: bw.raw('<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="vertical-align:-2px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>GitHub') }]) } };
-  }
-  function shell() {
-    bw.DOM('#app', { t: 'div', c: [
-      { t: 'div', a: { id: 'nav' } },
-      { t: 'div', a: { id: 'view' } },
-      { t: 'div', a: { class: 'foot' }, c: { t: 'div', a: { class: 'wrap' }, c: bw.raw('spab — robust text watermarking · zero dependencies · BSD-2-Clause · port <b>1948</b> (Shannon, 1948)') } }
-    ] });
-  }
-  function paint() {
-    var path = (location.hash || '#/').replace(/^#/, '') || '/';
-    bw.DOM('#nav', navbar(path));
-    var view = path === '/how' ? howView() : path === '/test' ? testView() : path === '/libraries' ? librariesView() : homeView();
-    bw.DOM('#view', view);
-    try { window.scrollTo(0, 0); } catch (e) {}
-  }
-  shell();
-  window.addEventListener('hashchange', paint);
-  paint();
+  // ================= boot =================
+  //
+  // Routes only. The header, nav, footer, theme toggle and scroll behaviour all
+  // come from site.js and are identical on every page that includes it.
+  SPABSite.start({
+    routes: {
+      '/':          homeView,
+      '/how':       howView,
+      '/test':      testView,
+      '/libraries': librariesView,
+      '*':          SPABSite.notFound
+    }
+  });
 })();
 </script>
 </body>
