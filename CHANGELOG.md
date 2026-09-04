@@ -1,10 +1,13 @@
 # Changelog
 
 All notable changes to spab. Format follows [Keep a Changelog](https://keepachangelog.com/),
-versions follow [SemVer](https://semver.org/). **Pre-release / not yet published** — versions below
-are development milestones of the JavaScript reference implementation (`src/js/spab.js`).
+versions follow [SemVer](https://semver.org/). The JavaScript reference implementation
+(`src/js/spab.js`) is published on npm as [`@deftio/spab`](https://www.npmjs.com/package/@deftio/spab);
+the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
+
+## [0.4.1] — 2026-09-04
 
 ### Added
 - **Keyed scramble (opt-in): interleave + whitening.** With `params.key`, the symbol stream is
