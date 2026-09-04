@@ -1,6 +1,6 @@
 # @deftio/spab
 
-**Robust text watermarking.** Hide an arbitrary payload — a serial, a hash, JSON, a short
+**Watermark plain text.** Hide an arbitrary payload — a serial, a hash, JSON, a short
 program — inside ordinary text, in choices a reader never notices: which space, which quote,
 which dash. The words read identically, and error correction carries the mark through
 copy/paste, reformatting, and Unicode normalization.

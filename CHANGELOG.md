@@ -71,6 +71,22 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   applies the `main` protection documented in `RELEASING.md` via `gh`.
 
 ### Changed
+- **Front page copy and demo reworked.** Headline is now "Mark a document without changing how it
+  reads" — the previous one said "Invisibly", and the tagline claimed *robust* text watermarking,
+  which the measurements do not yet establish; the site now says "watermark plain text". Second
+  person is gone from the headline, section copy and field labels. The version beside the wordmark
+  is read from `SPAB.VERSION` at runtime, so it cannot drift from the package. Nav type enlarged.
+- **The try-it demo is two stages instead of two separate tools:** original + secret on the left,
+  watermarked + recovered on the right. The watermarked box is editable and is the same field
+  recovery reads from, so the text can be mangled in place and recovered again — surviving ordinary
+  editing is the claim, and nothing previously invited anyone to test it. This also removes the
+  copy-from-one-card-into-another step that existed only to serve the old layout.
+- **Both demo panes are monospace, and the whitespace tell is now documented.** The whitespace
+  carrier substitutes narrower variants (thin, hair, six-per-em), so in a proportional face a marked
+  paragraph sets ~3% narrower than its source (measured: -3.26% system-ui, -2.13% Georgia, 0.00%
+  ui-monospace). Displayed side by side in a proportional font, the demo visibly contradicted the
+  claim next to it. Monospace normalizes the advances, and `How it works` now states the caveat
+  outright rather than leaving a reader to notice it.
 - **npm package is ready to publish as `@deftio/spab`.** `spab` itself is permanently unavailable on
   npm — it was unpublished in 2021 and npm retires unpublished names — so the scope is the way to
   keep one name across registries (`spab` is still free on PyPI and crates.io, and the `bin` stays

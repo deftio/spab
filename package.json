@@ -2,7 +2,7 @@
   "name": "spab-workspace",
   "private": true,
   "version": "0.4.0",
-  "description": "spab — robust text watermarking. Monorepo root (reference JS lib in src/js, research in r_and_d).",
+  "description": "spab \u2014 watermark plain text. Monorepo root (reference JS lib in src/js, research in r_and_d).",
   "license": "BSD-2-Clause",
   "author": "M. A. Chatterjee (deftio)",
   "dependencies": {},
@@ -18,11 +18,11 @@
     "basen": "node r_and_d/basen.js",
     "ci": "node tests/lint.js && node tests/roundtrip.test.js && node tests/branches.test.js && node r_and_d/harness.js --gen 500 --no-log && node r_and_d/symbol-survival.js --gen 500",
     "gui": "npx --yes --package bitwrench@2 bwcli serve . --port 1948",
-
+    "dev": "npx --yes --package bitwrench@2 bwcli serve . --port 1948",
     "whoami": "node tools/gh-identity.js",
     "start-release": "node tools/start-release.js",
     "release": "node tools/release.js",
     "release:dry": "node tools/release.js --dry-run"
   },
-  "//port": "1948 — the year Claude Shannon published 'A Mathematical Theory of Communication' (spab's entropy north star). Chosen to avoid the crowded 3000/8000/8080."
+  "//port": "1948 \u2014 the year Claude Shannon published 'A Mathematical Theory of Communication' (spab's entropy north star). Chosen to avoid the crowded 3000/8000/8080."
 }

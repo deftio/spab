@@ -49,7 +49,7 @@
   // editing this object.
   var SITE = {
     brand: 'spab',
-    tagline: 'robust text watermarking',
+    tagline: 'watermark plain text',
     github: 'https://github.com/deftio/spab',
     npm: '@deftio/spab',
 
@@ -130,14 +130,17 @@
       '.site-main': { flex: '1 0 auto' },
       '.wrap': { width: '100%', maxWidth: '1240px', margin: '0 auto', padding: '0 20px', boxSizing: 'border-box' },
 
-      '.site-head .wrap': { display: 'flex', alignItems: 'center', gap: '4px', height: '62px' },
-      '.brand': { display: 'inline-flex', alignItems: 'baseline', gap: '9px',
+      '.site-head .wrap': { display: 'flex', alignItems: 'center', gap: '4px', height: '66px' },
+      '.brand': { display: 'inline-flex', alignItems: 'baseline', gap: '8px',
         textDecoration: 'none', marginRight: 'auto' },
-      '.brand b': { fontSize: '21px', fontWeight: '800', letterSpacing: '-.02em' },
-      '.brand span': { fontSize: '12.5px', opacity: '.6', letterSpacing: '.01em' },
+      '.brand b': { fontSize: '22px', fontWeight: '800', letterSpacing: '-.02em' },
+      '.brand .ver': { fontSize: '12px', fontWeight: '600', letterSpacing: '0',
+        fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+        padding: '2px 7px', borderRadius: '999px' },
+      '.brand .tag': { fontSize: '13.5px', opacity: '.62', letterSpacing: '.01em' },
 
-      '.navlink': { textDecoration: 'none', padding: '7px 12px', borderRadius: '9px',
-        fontSize: '14px', fontWeight: '500', opacity: '.78',
+      '.navlink': { textDecoration: 'none', padding: '8px 13px', borderRadius: '9px',
+        fontSize: '15px', fontWeight: '500', opacity: '.8',
         transition: 'background .15s ease, opacity .15s ease' },
       '.navlink:hover': { opacity: '1' },
       '.navlink.is-active': { opacity: '1', fontWeight: '600' },
@@ -214,8 +217,16 @@
         background: 'rgba(255,255,255,.13)', color: '#fff' },
 
 
-      '.tryout': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
-        fontSize: '13px', lineHeight: '1.85', minHeight: '132px' },
+      // Both halves of the demo are set in the same monospace face, and that choice
+      // is load-bearing rather than cosmetic. The whitespace carrier substitutes
+      // narrower space variants (thin, hair, six-per-em), so in a proportional face
+      // the watermarked paragraph renders ~3% narrower than its source — visibly
+      // tighter word gaps, side by side with the original, on a page whose claim is
+      // that the copy reads the same. In the platform UI monospace the advances are
+      // identical (measured: 0.00% vs -3.26% in system-ui), so the pair matches and
+      // the demo stops contradicting the copy next to it.
+      '.grid2 textarea': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+        fontSize: '13.5px', lineHeight: '1.75' },
       '.recovered': { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
         fontSize: '15px', marginTop: '12px' },
       '.recovered b': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
@@ -263,6 +274,7 @@
         borderBottom: '1px solid ' + p.light.border },
       '.brand': { color: p.dark.base },
       '.brand b': { color: p.primary.base },
+      '.brand .ver': { background: p.primary.light, color: p.primary.base },
 
       '.navlink': { color: p.dark.base },
       '.navlink:hover': { background: p.light.base },
@@ -325,6 +337,15 @@
   // Nav links are built with bw.link(), so navigation goes through the router
   // (preventDefault + router.navigate) while the href stays a real URL — middle
   // click and "copy link address" keep working.
+  function version() {
+    try {
+      var v = root.SPAB && root.SPAB.VERSION;
+      return v ? 'v' + v : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
   function navTree() {
     var links = SITE.nav.map(function (n) {
       var cls = 'navlink' + (n.path === state.path ? ' is-active' : '');
@@ -332,7 +353,11 @@
     });
 
     return { t: 'div', a: { class: 'wrap' }, c: [
-      bw.link('/', [{ t: 'b', c: SITE.brand }, { t: 'span', c: SITE.tagline }], { class: 'brand' })
+      bw.link('/', [
+        { t: 'b', c: SITE.brand },
+        version() ? { t: 'span', a: { class: 'ver' }, c: version() } : null,
+        { t: 'span', a: { class: 'tag' }, c: SITE.tagline }
+      ].filter(Boolean), { class: 'brand' })
     ].concat(links).concat([
       { t: 'a', a: { class: 'icon-btn', href: SITE.github, target: '_blank', rel: 'noopener',
         title: 'Source on GitHub', 'aria-label': 'Source on GitHub' }, c: bw.raw(MARK) },

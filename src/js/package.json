@@ -1,7 +1,7 @@
 {
   "name": "@deftio/spab",
   "version": "0.4.0",
-  "description": "Robust text watermarking / steganography \u2014 hide an arbitrary payload in the whitespace and punctuation of text, protected by ECC. Zero dependencies.",
+  "description": "Watermark plain text \u2014 hide an arbitrary payload in the whitespace and punctuation of ordinary text, protected by error correction. Zero dependencies.",
   "type": "commonjs",
   "main": "spab.js",
   "browser": "spab.js",
