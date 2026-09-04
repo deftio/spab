@@ -353,9 +353,10 @@
 
   function tryView() {
     return S({
+      tight: true,
       eyebrow: 'Try it',
       title: 'Watermark a paragraph',
-      lede: 'Your text, your secret. The watermarked copy reads the same — paste it anywhere, then recover the secret from it.',
+      lede: 'Your text, your secret. The copy reads the same — paste it anywhere, then recover the secret.',
       content: { t: 'div', a: { class: 'grid2' }, c: [
 
         bw.makeCard({ title: 'Hide a secret', shadow: 'sm', content: { t: 'div', c: [
@@ -387,7 +388,6 @@
 
   function heroView() {
     return { t: 'section', a: { class: 'hero' }, c: { t: 'div', a: { class: 'wrap' }, c: [
-      { t: 'p', a: { class: 'eyebrow' }, c: 'Robust text watermarking' },
       { t: 'h1', c: 'Watermark your text. Invisibly.' },
       { t: 'p', a: { class: 'lede' }, c: bw.raw(
         'spab hides a payload — a serial, a hash, JSON — in choices ordinary text already makes: ' +
