@@ -1,18 +1,50 @@
 {
   "name": "@deftio/spab",
   "version": "0.4.0",
-  "description": "Robust text watermarking / steganography — hide an arbitrary payload in the whitespace and punctuation of text, protected by ECC. Zero dependencies.",
+  "description": "Robust text watermarking / steganography \u2014 hide an arbitrary payload in the whitespace and punctuation of text, protected by ECC. Zero dependencies.",
   "type": "commonjs",
   "main": "spab.js",
   "browser": "spab.js",
-  "bin": { "spab": "cli.js" },
-  "files": ["spab.js", "cli.js", "README.md"],
-  "keywords": ["watermark", "steganography", "text", "whitespace", "ecc", "no-deps"],
+  "bin": {
+    "spab": "cli.js"
+  },
+  "files": [
+    "spab.js",
+    "cli.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "watermark",
+    "watermarking",
+    "steganography",
+    "text",
+    "whitespace",
+    "unicode",
+    "ecc",
+    "provenance",
+    "zero-dependencies",
+    "no-deps"
+  ],
   "author": "M. A. Chatterjee (deftio)",
   "license": "BSD-2-Clause",
   "dependencies": {},
-  "engines": { "node": ">=14" },
+  "engines": {
+    "node": ">=14"
+  },
   "scripts": {
     "test": "node ../../tests/roundtrip.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deftio/spab.git",
+    "directory": "src/js"
+  },
+  "homepage": "https://deftio.github.io/spab/pages/",
+  "bugs": {
+    "url": "https://github.com/deftio/spab/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
