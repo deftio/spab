@@ -108,6 +108,12 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   failed later at release time with `main` already inconsistent.
 - **`.nojekyll`** at the repo root — Pages serves from `main` with the legacy Jekyll build, which
   silently drops underscore-prefixed paths (`src/python/spab/__init__.py`).
+- **`npm run release` rescues commits stranded on `main`.** Committing on `main` is an easy mistake
+  and, with branch protection on, a dead end — the push is rejected and the work sits there. The
+  script now detects commits on `main` that are not on `origin/main`, offers to move them to a branch
+  named from the newest commit's subject, and carries on into the normal PR flow. The branch is
+  created before `main` is reset, so an interruption cannot lose the commits, and `--dry-run`
+  describes the move without performing it.
 - **Commit-message hygiene gate.** A conversation/session identifier in a commit message is
   permanent once pushed — the object stays fetchable by SHA, the PR timeline keeps the record, and a
   revert adds a commit rather than removing one. `tools/release.js` now refuses to push when the
