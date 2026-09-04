@@ -71,6 +71,17 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   applies the `main` protection documented in `RELEASING.md` via `gh`.
 
 ### Changed
+- **npm package is ready to publish as `@deftio/spab`.** `spab` itself is permanently unavailable on
+  npm — it was unpublished in 2021 and npm retires unpublished names — so the scope is the way to
+  keep one name across registries (`spab` is still free on PyPI and crates.io, and the `bin` stays
+  `spab` either way). Packaging fixes: ship `LICENSE` (the tarball previously claimed BSD-2-Clause
+  with no license text), replace the 672-byte contributor note that npm would have rendered as the
+  package page with a real README, and add `repository`/`homepage`/`bugs` (the package had no links
+  at all) plus `publishConfig.access: public` so a scoped `npm publish` works without a flag.
+- **CLI help advertised a carrier class that does not exist.** Usage showed `--classes ws,punct`;
+  the real ids are `ws`, `apos`, `hyphen`, `wsdense`, `zwsp`. Corrected, and the full set is now
+  listed. Note that unknown class names are still accepted and silently ignored rather than
+  rejected — worth tightening separately.
 - **Home page fold tightened, hero gradient back to the brand pair.** The hero ramped through a
   single hue and read as a flat band; it now runs ink blue to the warm accent. Hero height went
   403px to 292px (padding, headline scale, section rhythm), so the try-it panel and both its cards

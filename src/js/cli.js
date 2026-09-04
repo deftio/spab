@@ -4,8 +4,8 @@
  * Minimal, self-contained (requires only ./spab.js). The richer exploration
  * playground lives in the repo at cli/spabdemo.js.
  *
- *   spab encode --message "secret" --in file.txt [--out out.txt] [--classes ws,punct]
- *   spab decode --in file.txt [--classes ws,punct]
+ *   spab encode --message "secret" --in file.txt [--out out.txt] [--classes ws,apos,hyphen]
+ *   spab decode --in file.txt [--classes ws,apos,hyphen]
  *   spab capacity --in file.txt
  *   spab help
  */
@@ -54,11 +54,12 @@ function help() {
   console.log([
     'spab — hide/reveal a message in the whitespace and punctuation of text',
     '',
-    '  spab encode --message "<secret>" --in <file> [--out <file>] [--classes ws,punct]',
-    '  spab decode --in <file> [--classes ws,punct]',
+    '  spab encode --message "<secret>" --in <file> [--out <file>] [--classes ws,apos,hyphen]',
+    '  spab decode --in <file> [--classes ws,apos,hyphen]',
     '  spab capacity --in <file>',
     '  spab help',
     '',
+    'Carrier classes: ws, apos, hyphen (on by default), wsdense, zwsp (opt-in).',
     'Input: --in <file> ("-" = stdin) or piped stdin. Output: stdout or --out <file>.'
   ].join('\n'));
 }
