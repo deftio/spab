@@ -15,10 +15,13 @@ You control the version number — the workflow never invents one. The workflows
   re-verifies tag == version + tests, then creates the Release. Use it to release from a specific
   commit. (The two never collide: bump-releases tag via the Actions token, which by design does not
   re-trigger the tag workflow.)
-- **`.github/workflows/publish.yml`** — runs when a Release is published. **Inert until credentials
-  are added:** each ecosystem job does a credential-free package check (proving publishability) and
-  publishes for real only when its token secret is set. Add `NPM_TOKEN` (npm, `@deftio/spab`) and
-  `PYPI_TOKEN` (PyPI) as repo secrets to go live; crates.io / Maven follow when those ports land.
+- **`.github/workflows/publish.yml`** — runs when a Release is published. **npm needs no secret:**
+  it uses OIDC trusted publishing, so GitHub mints a short-lived identity token for the workflow and
+  npm verifies it against the trusted publisher registered on the package (repo `deftio/spab`,
+  workflow `publish.yml`). Uploads carry a provenance attestation tying the tarball to the commit and
+  run that built it. Renaming or moving that workflow file breaks the match — update the trusted
+  publisher on npm if it ever moves. PyPI is still token-gated (`PYPI_TOKEN`) and inert until the
+  Python port is real; crates.io / Maven follow when those ports land.
 
 ## Cutting a release (normal path)
 
