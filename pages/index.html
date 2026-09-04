@@ -370,6 +370,14 @@
     paintFound();
   }
 
+  // A compact card that is entirely a link — used for the "read next" row.
+  function navCard(title, body, path) {
+    return bw.link(path, [
+      { t: 'span', a: { class: 'nc-title' }, c: [title, { t: 'span', a: { class: 'nc-arrow' }, c: ' →' }] },
+      { t: 'span', a: { class: 'nc-body' }, c: body }
+    ], { class: 'navcard' });
+  }
+
   function tryView() {
     return S({
       tight: true,
@@ -437,35 +445,32 @@
       }),
 
       S({
-        eyebrow: 'Why it holds up',
-        title: 'Robustness by construction',
-        content: bw.makeFeatureGrid({
-          columns: 3,
-          centered: false,
-          features: [
-            // NB: the prop is `description` — `desc` is silently dropped.
-            // Icons are text-presentation glyphs on purpose: an emoji-presentation
-            // character (👁) renders as a color emoji next to monochrome siblings.
-            { icon: '◈', title: 'Robust, not fragile',
-              description: 'Multiple carrier channels plus error correction. Whitespace and confusables fail on different edits, so the payload survives when one channel is wiped.' },
-            { icon: '◉', title: 'Invisible where it counts',
-              description: 'Renders identically in browsers, docs, chat, and PDFs. The mark is which space or which quote — not what the words say.' },
-            { icon: '◇', title: 'Zero dependencies',
-              description: 'A hand-rolled codec, GF(256) fountain, and framing — no third-party packages. One reference in JavaScript, more language ports on the way.' }
-          ]
-        })
-      }),
-
-      S({
-        eyebrow: 'The idea',
-        title: 'In one line',
+        title: 'What text watermarking is for',
         content: { t: 'div', c: [
-          { t: 'p', a: { class: 'prose' }, c: bw.raw('Text carries <b>spare entropy</b> — equivalent choices a reader won\'t notice (which space, which dash, straight vs. curly quote). spab measures that latent capacity, spends some on signal, and keeps enough margin (redundancy + ECC) to survive the channel. It\'s information-entropy management, applied to plain text.') },
-          { t: 'div', a: { style: bw.s({ marginTop: '26px' }) }, c: bw.makeCTA({
-            title: 'See it survive an attack',
-            description: 'Encode a message, then normalize, strip, or cut the text and watch which channel carries it through.',
-            actions: [bw.makeButton({ text: 'Open the playground →', variant: 'primary', onclick: function () { bw.navigate('/test'); } })]
-          }) }
+          { t: 'p', a: { class: 'prose' }, c: bw.raw(
+            'A watermark answers one narrow question: <b>which copy is this?</b> Images and audio have ' +
+            'carried that kind of mark for decades. Plain text mostly has not, because text has almost ' +
+            'no room to spare — a document says what it says, and there is no unused channel to write ' +
+            'into.') },
+          { t: 'p', a: { class: 'prose' }, c: bw.raw(
+            'There is a little room, though, in choices that carry no meaning of their own: which of ' +
+            'several equivalent spaces separates two words, whether a quote is straight or curly, ' +
+            'whether a dash is a hyphen-minus or a Unicode hyphen. spab spends part of that room on a ' +
+            'payload and keeps the rest as redundancy, so the mark survives being copied, reformatted ' +
+            'and normalized — the ordinary handling that would otherwise erase it.') },
+          { t: 'p', a: { class: 'prose' }, c: bw.raw(
+            'That makes it useful where a document travels and its origin matters: giving each ' +
+            'recipient of a draft a distinguishable copy, tagging generated output so it can be ' +
+            'recognized later, carrying a build or case number through a paste into a ticket. It is ' +
+            'not encryption and not a secrecy tool — anyone who knows which carriers are in use can ' +
+            'strip the mark, and rewriting the text removes it. The aim is surviving ordinary handling, ' +
+            'not resisting someone trying to remove it.') },
+
+          { t: 'div', a: { class: 'grid3', style: bw.s({ marginTop: '30px' }) }, c: [
+            navCard('How it works', 'The carriers, the parallel channels, the error correction — and the limits.', '/how'),
+            navCard('Playground', 'Attack a watermarked passage and watch which channel carries it through.', '/test'),
+            navCard('Libraries', 'Install, the API, and the ports that follow this reference.', '/libraries')
+          ] }
         ] }
       })
     ] };

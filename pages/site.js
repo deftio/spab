@@ -137,10 +137,10 @@
       '.brand .ver': { fontSize: '12px', fontWeight: '600', letterSpacing: '0',
         fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
         padding: '2px 7px', borderRadius: '999px' },
-      '.brand .tag': { fontSize: '13.5px', opacity: '.62', letterSpacing: '.01em' },
+      '.brand .tag': { fontSize: '13.5px', opacity: '.74', letterSpacing: '.01em' },
 
       '.navlink': { textDecoration: 'none', padding: '8px 13px', borderRadius: '9px',
-        fontSize: '15px', fontWeight: '500', opacity: '.8',
+        fontSize: '15px', fontWeight: '500', opacity: '.9',
         transition: 'background .15s ease, opacity .15s ease' },
       '.navlink:hover': { opacity: '1' },
       '.navlink.is-active': { opacity: '1', fontWeight: '600' },
@@ -153,7 +153,7 @@
       '.section': { padding: '42px 0' },
       '.section-tight': { padding: '24px 0' },
       '.prose': { maxWidth: '68ch', lineHeight: '1.72', fontSize: '16.5px' },
-      '.lede': { maxWidth: '72ch', fontSize: '17px', lineHeight: '1.55', opacity: '.8', marginTop: '8px' },
+      '.lede': { maxWidth: '72ch', fontSize: '17px', lineHeight: '1.55', opacity: '.88', marginTop: '8px' },
       '.eyebrow': { textTransform: 'uppercase', letterSpacing: '.09em', fontSize: '11.5px',
         fontWeight: '700', margin: '0 0 10px' },
 
@@ -185,6 +185,16 @@
       '.metawrap': { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' },
       '.chipwrap': { display: 'flex', flexWrap: 'wrap', gap: '8px' },
 
+      // Read-next cards: the whole card is the link, so the target is the card and
+      // not a word inside it.
+      '.navcard': { display: 'flex', flexDirection: 'column', gap: '6px',
+        padding: '16px 18px', borderRadius: '12px', textDecoration: 'none',
+        transition: 'border-color .15s ease, background .15s ease, transform .15s ease' },
+      '.navcard:hover': { transform: 'translateY(-1px)' },
+      '.nc-title': { fontWeight: '650', fontSize: '15.5px' },
+      '.nc-arrow': { opacity: '.55' },
+      '.nc-body': { fontSize: '14px', lineHeight: '1.5', opacity: '.82' },
+
       '.intgrid': { display: 'grid', gridTemplateColumns: '250px 1fr', gap: '26px', alignItems: 'start' },
       '.code': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
         fontSize: '13px', lineHeight: '1.65', padding: '14px 16px', borderRadius: '10px',
@@ -194,7 +204,7 @@
       'table.t th, table.t td': { textAlign: 'left', padding: '10px 12px' },
       'table.t th': { fontWeight: '600', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '.05em' },
 
-      '.foot': { padding: '30px 0', marginTop: '48px', fontSize: '13.5px', opacity: '.72' },
+      '.foot': { padding: '30px 0', marginTop: '48px', fontSize: '13.5px', opacity: '.82' },
 
       // Compact, left-justified hero: the old one spent most of the fold on padding
       // and centred type.
@@ -236,7 +246,7 @@
       '.stage': { display: 'flex', flexDirection: 'column', height: '100%' },
       '.stage .acts': { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 'auto' },
       '.stage .foot-note': { marginTop: '12px', minHeight: '44px', fontSize: '13.5px' },
-      '.stage .hint': { opacity: '.7', margin: '12px 0 0' },
+      '.stage .hint': { opacity: '.8', margin: '12px 0 0' },
 
       // Same metrics as a form control, so it lines up with the secret field opposite.
       '.readout': { display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap',
@@ -244,7 +254,7 @@
       '.readout .hit': { display: 'inline-flex', alignItems: 'center', gap: '9px' },
       '.readout b': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
         fontSize: '14.5px' },
-      '.readout .muted': { fontSize: '13.5px', opacity: '.6' },
+      '.readout .muted': { fontSize: '13.5px', opacity: '.72' },
 
       '@media (max-width: 880px)': {
         '.hero .wrap': { padding: '26px 20px 28px' }
@@ -301,6 +311,16 @@
 
       '.spab-view': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
       '.readout': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
+
+      // Cards and form fields sat on a near-white surface with a near-white edge.
+      // Firmer borders give the boxes a defined edge without adding weight.
+      '.bw_bccl_card': { borderColor: p.light.border },
+      '.bw_bccl_form_control': { borderColor: p.light.border },
+      '.bw_bccl_form_label': { color: p.dark.base, opacity: '.92' },
+
+      '.navcard': { border: '1px solid ' + p.light.border, background: p.surface, color: p.dark.base },
+      '.navcard:hover': { borderColor: p.primary.border, background: p.primary.light },
+      '.navcard .nc-title': { color: p.primary.base },
       '.pmark': { background: p.secondary.base, color: '#fff' },
       '.code': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
 
@@ -328,9 +348,9 @@
       // bitwrench maps `bw_text_muted` onto a warm palette entry, which renders
       // every feature description and CTA body in orange. Muted body copy should
       // read as quiet grey, not as an accent colour.
-      '.bw_text_muted': { color: p.dark.base + ' !important', opacity: '.68' },
+      '.bw_text_muted': { color: p.dark.base + ' !important', opacity: '.8' },
       // Same problem on the CTA body, which uses its own class.
-      '.bw_cta_description': { color: p.dark.base + ' !important', opacity: '.72' }
+      '.bw_cta_description': { color: p.dark.base + ' !important', opacity: '.82' }
     };
   }
 

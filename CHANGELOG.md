@@ -76,6 +76,14 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   which the measurements do not yet establish; the site now says "watermark plain text". Second
   person is gone from the headline, section copy and field labels. The version beside the wordmark
   is read from `SPAB.VERSION` at runtime, so it cannot drift from the package. Nav type enlarged.
+- **Home page loses two sections of filler.** "Robustness by construction" (a feature grid whose
+  copy restated the hero) and "The idea / In one line" are replaced by one prose section, *What text
+  watermarking is for*: what a watermark answers, why plain text is hard to mark, what it is
+  actually useful for, and an explicit statement that it is not encryption. It ends with links to
+  How it works, the Playground, and Libraries rather than another call to action.
+- **Contrast raised** across secondary text and box edges — several muted values were dialled far
+  enough down that labels and body copy read as disabled rather than secondary, and cards and form
+  fields sat on a near-white surface with a near-white border.
 - **The two demo panels mirror each other** — title, text box, single-value box, actions, note — so
   they are the same size by default (cards 590/590, text boxes 231/231, secret and recovered both
   41px). Equal card height is safe here precisely because the contents are mirrored; the earlier
