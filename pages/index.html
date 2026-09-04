@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>spab — robust text watermarking</title>
+<title>spab — watermark plain text</title>
 <meta name="description" content="spab embeds a payload in the whitespace and punctuation of ordinary text, protected by error correction so it survives copy/paste, reformatting, and normalization.">
 <meta name="color-scheme" content="light dark">
 <!-- GoatCounter analytics -->
@@ -277,7 +277,6 @@
     ] };
   }
 
-  // ================= HOME =================
 
   // ================= FRONT-PAGE TRY IT =================
   //
@@ -287,20 +286,70 @@
   // choose something before seeing it work has been left out.
   var TRY_PARAMS = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
 
-  var TRY_SAMPLE = 'Every document you send carries more than its words. The spacing between them, ' +
-    'the shape of a quote, the kind of dash you chose - these are choices a reader never notices, ' +
-    'and they are choices you can make on purpose. Paste your own paragraph here, pick a secret, ' +
-    'and watch it travel with the text wherever it is copied.';
+  var TRY_SAMPLE = 'Every document carries more than its words. The spacing between them, the shape ' +
+    'of a quote, the kind of dash - these are choices a reader never notices, and they can be made ' +
+    'on purpose. Replace this paragraph with any other, pick a secret, and the mark travels with ' +
+    'the text wherever it is copied.';
 
-  var tr = { cover: TRY_SAMPLE, secret: 'acme-42', out: '', note: null, kind: 'info', paste: '', found: undefined };
+  // Two stages, left to right: original + secret in, watermarked + recovered out.
+  //
+  // The watermarked box is EDITABLE and is the same field recovery reads from.
+  // That is deliberate: surviving ordinary editing is the whole claim, so the
+  // artifact a visitor is invited to mangle should be the one that gets decoded.
+  // It also removes a step that existed only to serve the old layout — copying
+  // the result out of one card and into a separate paste box.
+  var tr = { cover: TRY_SAMPLE, secret: 'acme-42', marked: '', note: null, kind: 'info', found: undefined };
+
+  // Light counts under each box. Chars and words being identical on both sides is
+  // the length-preservation claim, shown rather than asserted; the site count is
+  // what actually determines how much a passage can hold.
+  function statsLine(text, opts) {
+    var words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    var nonSpace = text.replace(/\s/g, '').length;
+    var parts = [
+      text.length + ' chars',
+      words + ' words',
+      nonSpace + ' non-space'
+    ];
+    if (opts && opts.sites !== undefined) parts.push(opts.sites + ' carrier sites');
+    return { t: 'p', a: { class: 'stats' }, c: parts.join('  ·  ') };
+  }
+
+  function paintStats() {
+    var sites = null;
+    try { sites = SPAB.getSites(tr.cover, TRY_PARAMS).length; } catch (e) { sites = undefined; }
+    bw.DOM('#statsIn', statsLine(tr.cover, { sites: sites }));
+    bw.DOM('#statsOut', tr.marked ? statsLine(tr.marked) : { t: 'span' });
+  }
 
   function paintTryNote() {
     bw.DOM('#tryNote', tr.note ? bw.makeAlert({ variant: tr.kind, content: bw.raw(tr.note) }) : { t: 'span' });
   }
 
-  function paintTryOut() {
-    bw.DOM('#tryOut', { t: 'textarea', a: { class: 'bw_bccl_form_control tryout', rows: 6,
-      readonly: 'readonly', spellcheck: 'false' }, c: tr.out });
+  function paintMarked() {
+    bw.DOM('#markedBox', control(bw.makeTextarea({
+      rows: 9,
+      value: tr.marked,
+      placeholder: 'The watermarked copy appears here. Edit it, or paste other text, then recover.'
+    }), 'oninput', function (e) { tr.marked = e.target.value; paintStats(); }));
+  }
+
+  function paintFound() {
+    var body;
+    if (tr.found === undefined) {
+      body = { t: 'span', a: { class: 'muted' }, c: 'Press Recover to read it back.' };
+    } else if (tr.found) {
+      body = { t: 'span', a: { class: 'hit' }, c: [
+        bw.makeBadge({ text: 'found', variant: 'success' }),
+        { t: 'b', c: tr.found }
+      ] };
+    } else {
+      body = { t: 'span', a: { class: 'hit' }, c: [
+        bw.makeBadge({ text: 'nothing', variant: 'light' }),
+        { t: 'span', a: { class: 'muted' }, c: 'No watermark in that text — or it was stripped.' }
+      ] };
+    }
+    bw.DOM('#recOut', { t: 'div', a: { class: 'readout' }, c: body });
   }
 
   function doWatermark() {
@@ -308,77 +357,81 @@
     try {
       res = SPAB.encode(tr.cover, tr.secret, TRY_PARAMS);
     } catch (e) {
-      tr.out = ''; tr.note = 'Could not watermark this text: ' + bw.escapeHTML(e.message); tr.kind = 'danger';
-      paintTryOut(); paintTryNote(); return;
+      tr.marked = ''; tr.note = 'Could not watermark this text: ' + bw.escapeHTML(e.message); tr.kind = 'danger';
+      paintMarked(); paintTryNote(); return;
     }
     var md = res.metadata;
-    tr.out = res.text;
+    tr.marked = res.text;
+    tr.found = undefined;   // a new mark invalidates the previous readout
 
-    // Verify by decoding what we just produced, rather than trusting the encode.
-    // A passage can be too short to hold the secret, and spab says so in its
-    // metadata instead of failing — so the honest thing is to check and explain.
+    // Verify by decoding what was just produced rather than trusting the encode:
+    // a passage can be too short to hold the secret, and spab reports that in
+    // metadata instead of failing, so the honest thing is to check and explain.
     var back = SPAB.decode(res.text, TRY_PARAMS);
     if (back.message === tr.secret) {
       tr.kind = 'success';
       tr.note = '<b>Hidden.</b> ' + md.payloadBytes + ' bytes carried ' + md.reps +
-        '\u00d7 over ' + md.slots + ' sites. The text below reads the same — copy it anywhere.';
+        '\u00d7 over ' + md.slots + ' sites.';
     } else {
       tr.kind = 'warning';
       tr.note = '<b>This passage is too short for that secret.</b> It needs ' + md.frameBits +
         ' bits and the best channel holds ' + md.capacityBits +
         '. Add a sentence or two, or use a shorter secret.';
     }
-    paintTryOut(); paintTryNote();
+    paintMarked(); paintFound(); paintTryNote(); paintStats();
   }
 
   function doRecover() {
     var d;
     try {
-      d = SPAB.decode(tr.paste, TRY_PARAMS);
+      d = SPAB.decode(tr.marked, TRY_PARAMS);
     } catch (e) {
       d = { message: null };
     }
     tr.found = d.message;
-    bw.DOM('#recOut', tr.found
-      ? { t: 'div', a: { class: 'recovered' }, c: [
-          bw.makeBadge({ text: 'recovered', variant: 'success' }),
-          { t: 'b', c: tr.found }
-        ] }
-      : { t: 'div', a: { class: 'recovered' }, c: [
-          bw.makeBadge({ text: 'nothing found', variant: 'light' }),
-          { t: 'span', a: { style: bw.s({ opacity: '.7', fontSize: '14px' }) },
-            c: 'No watermark in that text — or it was stripped.' }
-        ] });
+    paintFound();
+  }
+
+  // A compact card that is entirely a link — used for the "read next" row.
+  function navCard(title, body, path) {
+    return bw.link(path, [
+      { t: 'span', a: { class: 'nc-title' }, c: [title, { t: 'span', a: { class: 'nc-arrow' }, c: ' →' }] },
+      { t: 'span', a: { class: 'nc-body' }, c: body }
+    ], { class: 'navcard' });
   }
 
   function tryView() {
     return S({
       tight: true,
-      eyebrow: 'Try it',
       title: 'Watermark a paragraph',
-      lede: 'Your text, your secret. The copy reads the same — paste it anywhere, then recover the secret.',
-      content: { t: 'div', a: { class: 'grid2' }, c: [
+      lede: 'Text and a secret go in. The copy reads the same — and the secret comes back out of it.',
+      content: { t: 'div', a: { class: 'grid2 grid-even' }, c: [
 
-        bw.makeCard({ title: 'Hide a secret', shadow: 'sm', content: { t: 'div', c: [
-          field('Your text', control(bw.makeTextarea({ rows: 6, value: tr.cover }),
-            'oninput', function (e) { tr.cover = e.target.value; })),
-          field('Your secret', bw.makeInput({ type: 'text', value: tr.secret,
+        bw.makeCard({ title: 'Original', shadow: 'sm', content: { t: 'div', a: { class: 'stage' }, c: [
+          field('Text to watermark', control(bw.makeTextarea({ rows: 9, value: tr.cover }),
+            'oninput', function (e) { tr.cover = e.target.value; paintStats(); })),
+          { t: 'div', a: { id: 'statsIn' } },
+          field('Secret to hide', bw.makeInput({ type: 'text', value: tr.secret,
             oninput: function (e) { tr.secret = e.target.value; } })),
-          { t: 'div', c: bw.makeButton({ text: 'Watermark it →', variant: 'primary', onclick: doWatermark }) },
-          { t: 'div', a: { id: 'tryNote', style: bw.s({ marginTop: '14px' }) } },
-          { t: 'div', a: { id: 'tryOut', style: bw.s({ marginTop: '10px' }) } },
-          { t: 'div', a: { style: bw.s({ marginTop: '10px' }) }, c: bw.makeButton({
-            text: 'Copy watermarked text', variant: 'outline-secondary', size: 'sm',
-            onclick: function () { if (tr.out && navigator.clipboard) navigator.clipboard.writeText(tr.out); } }) }
+          { t: 'div', a: { class: 'acts' }, c: bw.makeButton({ text: 'Watermark it →', variant: 'primary', onclick: doWatermark }) },
+          { t: 'div', a: { id: 'tryNote', class: 'foot-note' } }
         ] } }),
 
-        bw.makeCard({ title: 'Recover a secret', shadow: 'sm', content: { t: 'div', c: [
-          field('Paste watermarked text', control(bw.makeTextarea({ rows: 6, placeholder: 'Paste text here…' }),
-            'oninput', function (e) { tr.paste = e.target.value; })),
-          { t: 'div', c: bw.makeButton({ text: 'Recover →', variant: 'primary', onclick: doRecover }) },
-          { t: 'div', a: { id: 'recOut' } },
-          { t: 'p', a: { style: bw.s({ marginTop: '16px', fontSize: '13.5px', opacity: '.7' }) },
-            c: 'Copy the result from the left, paste it here, and it comes back. Edit a few words first — it still comes back.' }
+        bw.makeCard({ title: 'Watermarked', shadow: 'sm', content: { t: 'div', a: { class: 'stage' }, c: [
+          field('Watermarked copy — editable', { t: 'div', a: { id: 'markedBox' } }),
+          { t: 'div', a: { id: 'statsOut' } },
+          // The action sits between the text it reads and the value it produces,
+          // so the panel reads top to bottom in the order it actually happens.
+          { t: 'div', a: { class: 'acts' }, c: [
+            bw.makeButton({ text: 'Recover →', variant: 'primary', onclick: doRecover }),
+            bw.makeButton({ text: 'Copy', variant: 'outline-secondary',
+              onclick: function () { if (tr.marked && navigator.clipboard) navigator.clipboard.writeText(tr.marked); } })
+          ] },
+          field('Recovered secret', { t: 'div', a: { id: 'recOut' } }),
+          { t: 'p', a: { class: 'foot-note hint' },
+            c: bw.raw('Rewording in place survives — replace a word with one of the same shape and recover again. ' +
+              '<b>Adding or deleting words does not:</b> it shifts every carrier position after the edit. See ' +
+              '<a href="#/how">How it works</a>.') }
         ] } })
       ] }
     });
@@ -388,11 +441,11 @@
 
   function heroView() {
     return { t: 'section', a: { class: 'hero' }, c: { t: 'div', a: { class: 'wrap' }, c: [
-      { t: 'h1', c: 'Watermark your text. Invisibly.' },
+      { t: 'h1', c: 'Mark a document without changing how it reads.' },
       { t: 'p', a: { class: 'lede' }, c: bw.raw(
         'spab hides a payload — a serial, a hash, JSON — in choices ordinary text already makes: ' +
-        'which space, which quote, which dash. The words read identically, and error correction ' +
-        'carries the mark through copy/paste, reformatting, and normalization.') },
+        'which space, which quote, which dash. Error correction carries the mark through ' +
+        'copy/paste, reformatting, and normalization.') },
       { t: 'div', a: { class: 'btns' }, c: [
         bw.makeButton({ text: 'Try the live demo →', variant: 'light', size: 'lg',
           onclick: function () { bw.navigate('/test'); } }),
@@ -420,35 +473,32 @@
       }),
 
       S({
-        eyebrow: 'Why it holds up',
-        title: 'Robustness by construction',
-        content: bw.makeFeatureGrid({
-          columns: 3,
-          centered: false,
-          features: [
-            // NB: the prop is `description` — `desc` is silently dropped.
-            // Icons are text-presentation glyphs on purpose: an emoji-presentation
-            // character (👁) renders as a color emoji next to monochrome siblings.
-            { icon: '◈', title: 'Robust, not fragile',
-              description: 'Multiple carrier channels plus error correction. Whitespace and confusables fail on different edits, so the payload survives when one channel is wiped.' },
-            { icon: '◉', title: 'Invisible where it counts',
-              description: 'Renders identically in browsers, docs, chat, and PDFs. The mark is which space or which quote — not what the words say.' },
-            { icon: '◇', title: 'Zero dependencies',
-              description: 'A hand-rolled codec, GF(256) fountain, and framing — no third-party packages. One reference in JavaScript, more language ports on the way.' }
-          ]
-        })
-      }),
-
-      S({
-        eyebrow: 'The idea',
-        title: 'In one line',
+        title: 'About Text Watermarks',
         content: { t: 'div', c: [
-          { t: 'p', a: { class: 'prose' }, c: bw.raw('Text carries <b>spare entropy</b> — equivalent choices a reader won\'t notice (which space, which dash, straight vs. curly quote). spab measures that latent capacity, spends some on signal, and keeps enough margin (redundancy + ECC) to survive the channel. It\'s information-entropy management, applied to plain text.') },
-          { t: 'div', a: { style: bw.s({ marginTop: '26px' }) }, c: bw.makeCTA({
-            title: 'See it survive an attack',
-            description: 'Encode a message, then normalize, strip, or cut the text and watch which channel carries it through.',
-            actions: [bw.makeButton({ text: 'Open the playground →', variant: 'primary', onclick: function () { bw.navigate('/test'); } })]
-          }) }
+          { t: 'p', a: { class: 'prose' }, c: bw.raw(
+            'A watermark answers one narrow question: <b>which copy is this?</b> Images and audio have ' +
+            'carried that kind of mark for decades. Plain text mostly has not, because text has almost ' +
+            'no room to spare — a document says what it says, and there is no unused channel to write ' +
+            'into.') },
+          { t: 'p', a: { class: 'prose' }, c: bw.raw(
+            'There is a little room, though, in choices that carry no meaning of their own: which of ' +
+            'several equivalent spaces separates two words, whether a quote is straight or curly, ' +
+            'whether a dash is a hyphen-minus or a Unicode hyphen. spab spends part of that room on a ' +
+            'payload and keeps the rest as redundancy, so the mark survives being copied, reformatted ' +
+            'and normalized — the ordinary handling that would otherwise erase it.') },
+          { t: 'p', a: { class: 'prose' }, c: bw.raw(
+            'That makes it useful where a document travels and its origin matters: giving each ' +
+            'recipient of a draft a distinguishable copy, tagging generated output so it can be ' +
+            'recognized later, carrying a build or case number through a paste into a ticket. It is ' +
+            'not encryption and not a secrecy tool — anyone who knows which carriers are in use can ' +
+            'strip the mark, and rewriting the text removes it. The aim is surviving ordinary handling, ' +
+            'not resisting someone trying to remove it.') },
+
+          { t: 'div', a: { class: 'grid3', style: bw.s({ marginTop: '30px' }) }, c: [
+            navCard('How it works', 'The carriers, the parallel channels, the error correction — and the limits.', '/how'),
+            navCard('Playground', 'Attack a watermarked passage and watch which channel carries it through.', '/test'),
+            navCard('Libraries', 'Install, the API, and the ports that follow this reference.', '/libraries')
+          ] }
         ] }
       })
     ] };
@@ -469,7 +519,8 @@
             ['apostrophe', bw.raw("straight <code>'</code> / curly <code>&#8217;</code>"), '1', bw.raw('<b style="color:' + p.success.base + '">yes</b>')],
             ['hyphen', bw.raw('hyphen-minus / Unicode hyphen'), '1', bw.raw('<b style="color:' + p.success.base + '">yes</b>')]
           ]),
-          { t: 'p', a: { class: 'prose' }, c: bw.raw('The key insight: <b>NFKC normalization</b> (common in databases, forms, and search) erases every whitespace variant, but the confusables survive it — while a "smart-quote" autocorrect erases the apostrophe channel but leaves whitespace. They fail on <i>different</i> channels.') }
+          { t: 'p', a: { class: 'prose' }, c: bw.raw('The key insight: <b>NFKC normalization</b> (common in databases, forms, and search) erases every whitespace variant, but the confusables survive it — while a "smart-quote" autocorrect erases the apostrophe channel but leaves whitespace. They fail on <i>different</i> channels.') },
+          { t: 'p', a: { class: 'prose' }, c: bw.raw('One honest caveat about the whitespace carrier: the variants are <i>equivalent</i>, not <i>identical</i>. Thin, hair and six-per-em spaces are narrower than a plain space, so in a proportional font a marked paragraph sets about <b>3% narrower</b> than its source — invisible on its own, occasionally noticeable side by side. The confusable carriers (quote, hyphen) have no such tell. Monospace rendering normalizes the advances entirely.') }
         ] }
       }),
 

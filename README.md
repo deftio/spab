@@ -7,15 +7,35 @@
 [![license](https://img.shields.io/badge/license-BSD--2--Clause-blue)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-deftio%2Fspab-181717?logo=github)](https://github.com/deftio/spab)
 
-**spab** hides an arbitrary payload (a magic word, an ID/hash, JSON, even a small program) in
-the *whitespace and punctuation choices* of ordinary text, protected by error correction so it
-survives normal editing — copy/paste, reformatting, excerpting. The text reads identically; the
-signal lives in equivalent choices a reader won't notice. It's information-entropy management: mine
-the spare entropy in formatting/phrasing, spend some on signal, keep margin to survive the channel.
+**spab** puts a payload — a serial number, a hash, a short piece of JSON — inside ordinary text,
+using choices that carry no meaning of their own: which of several equivalent spaces sits between
+two words, whether an apostrophe is straight or curly, whether a dash is a hyphen-minus or a
+Unicode hyphen. The words are untouched, so the text reads exactly as it did before.
 
-> Status: early development. The **JavaScript reference implementation** (`src/js`) ships a working
-> baseline (`0.1.0`); other language ports are scaffolded but not yet written. Design and rationale
-> live in `r_and_d/docs` (see the **encoder/decoder proposal v1**).
+Error correction is what makes that useful. A mark that breaks on the first edit is a curiosity;
+spab spreads the payload across several independent carriers and adds redundancy, so it survives
+copy/paste, reformatting, and Unicode normalization. The carriers are chosen to fail on *different*
+edits — normalization erases the whitespace channel but leaves the punctuation one, and a
+smart-quote autocorrect does the reverse.
+
+The underlying idea is ordinary information theory. Text carries spare entropy: equivalent ways of
+writing the same thing. spab measures how much a passage has, spends part of it on a signal, and
+keeps the rest as margin against a lossy channel. When a passage is too short to hold a payload
+safely, it says so rather than returning something that will not decode.
+
+It is not a secrecy tool. Anyone who knows which carriers are in use can strip the mark, and
+rewriting the text removes it entirely. The goal is incidental robustness — surviving ordinary
+editing and copying — not resisting someone who is trying to remove it.
+
+```bash
+npm install @deftio/spab
+```
+
+Try it on real text in the browser: **[deftio.github.io/spab](https://deftio.github.io/spab/pages/)**
+
+> Status: early, but published. The **JavaScript reference implementation** (`src/js`) is on npm as
+> [`@deftio/spab`](https://www.npmjs.com/package/@deftio/spab); ports for other languages are
+> scaffolded, not yet written. Design and rationale live in `r_and_d/docs`.
 
 ## Repository layout
 

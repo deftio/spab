@@ -49,7 +49,7 @@
   // editing this object.
   var SITE = {
     brand: 'spab',
-    tagline: 'robust text watermarking',
+    tagline: 'watermark plain text',
     github: 'https://github.com/deftio/spab',
     npm: '@deftio/spab',
 
@@ -130,14 +130,17 @@
       '.site-main': { flex: '1 0 auto' },
       '.wrap': { width: '100%', maxWidth: '1240px', margin: '0 auto', padding: '0 20px', boxSizing: 'border-box' },
 
-      '.site-head .wrap': { display: 'flex', alignItems: 'center', gap: '4px', height: '62px' },
-      '.brand': { display: 'inline-flex', alignItems: 'baseline', gap: '9px',
+      '.site-head .wrap': { display: 'flex', alignItems: 'center', gap: '4px', height: '66px' },
+      '.brand': { display: 'inline-flex', alignItems: 'baseline', gap: '8px',
         textDecoration: 'none', marginRight: 'auto' },
-      '.brand b': { fontSize: '21px', fontWeight: '800', letterSpacing: '-.02em' },
-      '.brand span': { fontSize: '12.5px', opacity: '.6', letterSpacing: '.01em' },
+      '.brand b': { fontSize: '22px', fontWeight: '800', letterSpacing: '-.02em' },
+      '.brand .ver': { fontSize: '12px', fontWeight: '600', letterSpacing: '0',
+        fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+        padding: '2px 7px', borderRadius: '999px' },
+      '.brand .tag': { fontSize: '13.5px', opacity: '.74', letterSpacing: '.01em' },
 
-      '.navlink': { textDecoration: 'none', padding: '7px 12px', borderRadius: '9px',
-        fontSize: '14px', fontWeight: '500', opacity: '.78',
+      '.navlink': { textDecoration: 'none', padding: '8px 13px', borderRadius: '9px',
+        fontSize: '15px', fontWeight: '500', opacity: '.9',
         transition: 'background .15s ease, opacity .15s ease' },
       '.navlink:hover': { opacity: '1' },
       '.navlink.is-active': { opacity: '1', fontWeight: '600' },
@@ -150,7 +153,7 @@
       '.section': { padding: '42px 0' },
       '.section-tight': { padding: '24px 0' },
       '.prose': { maxWidth: '68ch', lineHeight: '1.72', fontSize: '16.5px' },
-      '.lede': { maxWidth: '72ch', fontSize: '17px', lineHeight: '1.55', opacity: '.8', marginTop: '8px' },
+      '.lede': { maxWidth: '72ch', fontSize: '17px', lineHeight: '1.55', opacity: '.88', marginTop: '8px' },
       '.eyebrow': { textTransform: 'uppercase', letterSpacing: '.09em', fontSize: '11.5px',
         fontWeight: '700', margin: '0 0 10px' },
 
@@ -182,6 +185,16 @@
       '.metawrap': { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' },
       '.chipwrap': { display: 'flex', flexWrap: 'wrap', gap: '8px' },
 
+      // Read-next cards: the whole card is the link, so the target is the card and
+      // not a word inside it.
+      '.navcard': { display: 'flex', flexDirection: 'column', gap: '6px',
+        padding: '16px 18px', borderRadius: '12px', textDecoration: 'none',
+        transition: 'border-color .15s ease, background .15s ease, transform .15s ease' },
+      '.navcard:hover': { transform: 'translateY(-1px)' },
+      '.nc-title': { fontWeight: '650', fontSize: '15.5px' },
+      '.nc-arrow': { opacity: '.55' },
+      '.nc-body': { fontSize: '14px', lineHeight: '1.5', opacity: '.82' },
+
       '.intgrid': { display: 'grid', gridTemplateColumns: '250px 1fr', gap: '26px', alignItems: 'start' },
       '.code': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
         fontSize: '13px', lineHeight: '1.65', padding: '14px 16px', borderRadius: '10px',
@@ -191,7 +204,7 @@
       'table.t th, table.t td': { textAlign: 'left', padding: '10px 12px' },
       'table.t th': { fontWeight: '600', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '.05em' },
 
-      '.foot': { padding: '30px 0', marginTop: '48px', fontSize: '13.5px', opacity: '.72' },
+      '.foot': { padding: '30px 0', marginTop: '48px', fontSize: '13.5px', opacity: '.82' },
 
       // Compact, left-justified hero: the old one spent most of the fold on padding
       // and centred type.
@@ -214,12 +227,36 @@
         background: 'rgba(255,255,255,.13)', color: '#fff' },
 
 
-      '.tryout': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
-        fontSize: '13px', lineHeight: '1.85', minHeight: '132px' },
-      '.recovered': { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
-        fontSize: '15px', marginTop: '12px' },
-      '.recovered b': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
-        fontSize: '16px' },
+      // Both halves of the demo are set in the same monospace face, and that choice
+      // is load-bearing rather than cosmetic. The whitespace carrier substitutes
+      // narrower space variants (thin, hair, six-per-em), so in a proportional face
+      // the watermarked paragraph renders ~3% narrower than its source — visibly
+      // tighter word gaps, side by side with the original, on a page whose claim is
+      // that the copy reads the same. In the platform UI monospace the advances are
+      // identical (measured: 0.00% vs -3.26% in system-ui), so the pair matches and
+      // the demo stops contradicting the copy next to it.
+      '.grid2 textarea': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+        fontSize: '13.5px', lineHeight: '1.75' },
+      // The two demo panels mirror each other row for row — text box, single-value
+      // box, actions, note — so they are the same size by default. Equal card
+      // height is safe here (unlike a pair holding different amounts) precisely
+      // because the contents are mirrored, so nothing leaves a void.
+      '.grid-even': { alignItems: 'stretch' },
+      '.grid-even > .bw_bccl_card': { height: '100%' },
+      '.stage': { display: 'flex', flexDirection: 'column', height: '100%' },
+      '.stage .acts': { display: 'flex', gap: '8px', flexWrap: 'wrap', margin: '4px 0 16px' },
+      '.stage .foot-note': { marginTop: 'auto', paddingTop: '14px', minHeight: '44px', fontSize: '13.5px' },
+      '.stage .hint': { opacity: '.8', marginBottom: '0' },
+      '.stats': { margin: '-4px 0 12px', fontSize: '12.5px', letterSpacing: '.01em',
+        fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', opacity: '.72' },
+
+      // Same metrics as a form control, so it lines up with the secret field opposite.
+      '.readout': { display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap',
+        minHeight: '41px', padding: '7px 12px', borderRadius: '10px', boxSizing: 'border-box' },
+      '.readout .hit': { display: 'inline-flex', alignItems: 'center', gap: '9px' },
+      '.readout b': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+        fontSize: '14.5px' },
+      '.readout .muted': { fontSize: '13.5px', opacity: '.72' },
 
       '@media (max-width: 880px)': {
         '.hero .wrap': { padding: '26px 20px 28px' }
@@ -263,6 +300,7 @@
         borderBottom: '1px solid ' + p.light.border },
       '.brand': { color: p.dark.base },
       '.brand b': { color: p.primary.base },
+      '.brand .ver': { background: p.primary.light, color: p.primary.base },
 
       '.navlink': { color: p.dark.base },
       '.navlink:hover': { background: p.light.base },
@@ -274,6 +312,17 @@
       '.eyebrow': { color: p.primary.base, opacity: '.9' },
 
       '.spab-view': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
+      '.readout': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
+
+      // Cards and form fields sat on a near-white surface with a near-white edge.
+      // Firmer borders give the boxes a defined edge without adding weight.
+      '.bw_bccl_card': { borderColor: p.light.border },
+      '.bw_bccl_form_control': { borderColor: p.light.border },
+      '.bw_bccl_form_label': { color: p.dark.base, opacity: '.92' },
+
+      '.navcard': { border: '1px solid ' + p.light.border, background: p.surface, color: p.dark.base },
+      '.navcard:hover': { borderColor: p.primary.border, background: p.primary.light },
+      '.navcard .nc-title': { color: p.primary.base },
       '.pmark': { background: p.secondary.base, color: '#fff' },
       '.code': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
 
@@ -301,9 +350,9 @@
       // bitwrench maps `bw_text_muted` onto a warm palette entry, which renders
       // every feature description and CTA body in orange. Muted body copy should
       // read as quiet grey, not as an accent colour.
-      '.bw_text_muted': { color: p.dark.base + ' !important', opacity: '.68' },
+      '.bw_text_muted': { color: p.dark.base + ' !important', opacity: '.8' },
       // Same problem on the CTA body, which uses its own class.
-      '.bw_cta_description': { color: p.dark.base + ' !important', opacity: '.72' }
+      '.bw_cta_description': { color: p.dark.base + ' !important', opacity: '.82' }
     };
   }
 
@@ -325,6 +374,33 @@
   // Nav links are built with bw.link(), so navigation goes through the router
   // (preventDefault + router.navigate) while the href stays a real URL — middle
   // click and "copy link address" keep working.
+  function version() {
+    try {
+      var v = root.SPAB && root.SPAB.VERSION;
+      return v ? 'v' + v : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // Hash routes are not page loads, so the analytics snippet never sees them: the
+  // whole site would report as a single hit on the entry URL. Count each route
+  // explicitly. Guarded throughout — the script is async and blocked by plenty of
+  // browsers, and analytics must never be able to break the page.
+  var lastCounted = null;
+  function countView(path) {
+    try {
+      if (!root.goatcounter || typeof root.goatcounter.count !== 'function') return;
+      if (path === lastCounted) return;          // no double counting on re-render
+      lastCounted = path;
+      root.goatcounter.count({
+        path: (root.location.pathname || '') + '#' + path,
+        title: SITE.brand + ' — ' + path,
+        event: false
+      });
+    } catch (e) { /* analytics is never load-bearing */ }
+  }
+
   function navTree() {
     var links = SITE.nav.map(function (n) {
       var cls = 'navlink' + (n.path === state.path ? ' is-active' : '');
@@ -332,7 +408,11 @@
     });
 
     return { t: 'div', a: { class: 'wrap' }, c: [
-      bw.link('/', [{ t: 'b', c: SITE.brand }, { t: 'span', c: SITE.tagline }], { class: 'brand' })
+      bw.link('/', [
+        { t: 'b', c: SITE.brand },
+        version() ? { t: 'span', a: { class: 'ver' }, c: version() } : null,
+        { t: 'span', a: { class: 'tag' }, c: SITE.tagline }
+      ].filter(Boolean), { class: 'brand' })
     ].concat(links).concat([
       { t: 'a', a: { class: 'icon-btn', href: SITE.github, target: '_blank', rel: 'noopener',
         title: 'Source on GitHub', 'aria-label': 'Source on GitHub' }, c: bw.raw(MARK) },
@@ -416,6 +496,7 @@
         state.path = (e && e.path) || '/';
         paintNav();
         try { root.scrollTo(0, 0); } catch (err) { /* non-browser host */ }
+        countView(state.path);
       });
 
       // The router MUST exist before any chrome is painted. bw.link() emits a

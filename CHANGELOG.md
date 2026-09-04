@@ -71,6 +71,46 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   applies the `main` protection documented in `RELEASING.md` via `gh`.
 
 ### Changed
+- **Analytics on every page, including hash routes.** The site is a hash-routed single page, so the
+  stock GoatCounter snippet only ever counted the entry URL — every visit looked like one hit on
+  `/pages/`. `site.js` now counts each route change as its own view, guarded so a blocked or absent
+  analytics script can never break the page.
+- **Light counts under each demo box** — chars, words, non-space characters, and the carrier-site
+  count on the input side. The two sides showing identical chars/words is the length-preservation
+  claim demonstrated rather than asserted.
+- **Corrected a false claim in the demo.** The hint read "the mark survives ordinary editing". It
+  does not: deleting or inserting a word shifts every carrier position after the edit and recovery
+  fails at every redundancy level measured (1x, 2x, 4x, 11x). Rewording in place does survive. The
+  hint now says which is which and links to `How it works`.
+- **Recover sits above the recovered secret**, between the text it reads and the value it produces.
+- **Front page copy and demo reworked.** Headline is now "Mark a document without changing how it
+  reads" — the previous one said "Invisibly", and the tagline claimed *robust* text watermarking,
+  which the measurements do not yet establish; the site now says "watermark plain text". Second
+  person is gone from the headline, section copy and field labels. The version beside the wordmark
+  is read from `SPAB.VERSION` at runtime, so it cannot drift from the package. Nav type enlarged.
+- **Home page loses two sections of filler.** "Robustness by construction" (a feature grid whose
+  copy restated the hero) and "The idea / In one line" are replaced by one prose section, *About Text
+  Watermarks*: what a watermark answers, why plain text is hard to mark, what it is
+  actually useful for, and an explicit statement that it is not encryption. It ends with links to
+  How it works, the Playground, and Libraries rather than another call to action.
+- **Contrast raised** across secondary text and box edges — several muted values were dialled far
+  enough down that labels and body copy read as disabled rather than secondary, and cards and form
+  fields sat on a near-white surface with a near-white border.
+- **The two demo panels mirror each other** — title, text box, single-value box, actions, note — so
+  they are the same size by default (cards 590/590, text boxes 231/231, secret and recovered both
+  41px). Equal card height is safe here precisely because the contents are mirrored; the earlier
+  pair held very different amounts and had to size to content to avoid a void.
+- **The try-it demo is two stages instead of two separate tools:** original + secret on the left,
+  watermarked + recovered on the right. The watermarked box is editable and is the same field
+  recovery reads from, so the text can be mangled in place and recovered again — surviving ordinary
+  editing is the claim, and nothing previously invited anyone to test it. This also removes the
+  copy-from-one-card-into-another step that existed only to serve the old layout.
+- **Both demo panes are monospace, and the whitespace tell is now documented.** The whitespace
+  carrier substitutes narrower variants (thin, hair, six-per-em), so in a proportional face a marked
+  paragraph sets ~3% narrower than its source (measured: -3.26% system-ui, -2.13% Georgia, 0.00%
+  ui-monospace). Displayed side by side in a proportional font, the demo visibly contradicted the
+  claim next to it. Monospace normalizes the advances, and `How it works` now states the caveat
+  outright rather than leaving a reader to notice it.
 - **npm package is ready to publish as `@deftio/spab`.** `spab` itself is permanently unavailable on
   npm — it was unpublished in 2021 and npm retires unpublished names — so the scope is the way to
   keep one name across registries (`spab` is still free on PyPI and crates.io, and the `bin` stays
