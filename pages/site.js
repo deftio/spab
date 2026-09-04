@@ -147,10 +147,10 @@
         background: 'transparent', cursor: 'pointer', opacity: '.8' },
       '.icon-btn:hover': { opacity: '1' },
 
-      '.section': { padding: '52px 0' },
-      '.section-tight': { padding: '30px 0' },
+      '.section': { padding: '42px 0' },
+      '.section-tight': { padding: '24px 0' },
       '.prose': { maxWidth: '68ch', lineHeight: '1.72', fontSize: '16.5px' },
-      '.lede': { maxWidth: '72ch', fontSize: '18.5px', lineHeight: '1.6', opacity: '.8', marginTop: '10px' },
+      '.lede': { maxWidth: '72ch', fontSize: '17px', lineHeight: '1.55', opacity: '.8', marginTop: '8px' },
       '.eyebrow': { textTransform: 'uppercase', letterSpacing: '.09em', fontSize: '11.5px',
         fontWeight: '700', margin: '0 0 10px' },
 
@@ -195,11 +195,23 @@
 
       // Compact, left-justified hero: the old one spent most of the fold on padding
       // and centred type.
-      '.hero .wrap': { padding: '46px 20px 48px' },
-      '.hero h1': { fontSize: 'clamp(30px,3.5vw,46px)', lineHeight: '1.06',
-        letterSpacing: '-.03em', margin: '0 0 14px', fontWeight: '800' },
-      '.hero .lede': { fontSize: '17px', lineHeight: '1.6', margin: '0 0 24px', maxWidth: '60ch' },
+      '.hero .wrap': { padding: '34px 20px 36px' },
+      '.hero h1': { fontSize: 'clamp(28px,3.1vw,40px)', lineHeight: '1.05',
+        letterSpacing: '-.03em', margin: '0 0 11px', fontWeight: '800' },
+      '.hero .lede': { fontSize: '16px', lineHeight: '1.55', margin: '0 0 20px', maxWidth: '62ch' },
       '.hero .btns': { display: 'flex', gap: '10px', flexWrap: 'wrap' },
+
+      // The hero is a dark gradient in BOTH themes, but button variants flip with
+      // the theme — so in dark mode `light` became a dark pill and `outline-light`
+      // rendered near-black text on the gradient. Pin both to light-on-dark here,
+      // in the theme-independent rules, so they read the same either way.
+      '.hero .bw_bccl_btn.bw_light': { background: '#fff', color: '#16204a',
+        border: '1px solid #fff', fontWeight: '600' },
+      '.hero .bw_bccl_btn.bw_light:hover': { background: 'rgba(255,255,255,.9)', color: '#16204a' },
+      '.hero .bw_bccl_btn.bw_bccl_btn_outline.bw_light': { background: 'transparent',
+        color: '#fff', border: '1px solid rgba(255,255,255,.62)', fontWeight: '600' },
+      '.hero .bw_bccl_btn.bw_bccl_btn_outline.bw_light:hover': {
+        background: 'rgba(255,255,255,.13)', color: '#fff' },
 
 
       '.tryout': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
@@ -210,7 +222,7 @@
         fontSize: '16px' },
 
       '@media (max-width: 880px)': {
-        '.hero .wrap': { padding: '34px 20px 36px' }
+        '.hero .wrap': { padding: '26px 20px 28px' }
       },
 
       // Left-justify content that the components centre by default.
@@ -222,7 +234,7 @@
       '.bw_bccl_cta .bw_container': { maxWidth: 'none', paddingLeft: '0', paddingRight: '0' },
 
       '.install .wrap': { display: 'flex', alignItems: 'center', gap: '14px',
-        flexWrap: 'wrap', padding: '14px 24px' },
+        flexWrap: 'wrap', padding: '11px 20px' },
       '.install .k': { textTransform: 'uppercase', letterSpacing: '.1em',
         fontSize: '11px', fontWeight: '700' },
       '.install code': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
@@ -274,7 +286,7 @@
       // content, and this is left-justified and deliberately short — the fold
       // belongs to the try-it panel below, not to a tall banner.
       '.hero': { background: 'linear-gradient(135deg,' + p.primary.active + ' 0%,' +
-        p.primary.base + ' 58%,' + p.tertiary.base + ' 145%)', color: '#fff' },
+        p.primary.base + ' 42%,' + p.secondary.base + ' 118%)', color: '#fff' },
       '.hero .eyebrow': { color: 'rgba(255,255,255,.72)' },
       '.hero h1': { color: '#fff' },
       '.hero .lede': { color: 'rgba(255,255,255,.86)' },

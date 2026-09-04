@@ -71,6 +71,12 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   applies the `main` protection documented in `RELEASING.md` via `gh`.
 
 ### Changed
+- **Home page fold tightened, hero gradient back to the brand pair.** The hero ramped through a
+  single hue and read as a flat band; it now runs ink blue to the warm accent. Hero height went
+  403px to 292px (padding, headline scale, section rhythm), so the try-it panel and both its cards
+  are above the fold at 1320x860. Hero buttons are pinned light-on-dark in the theme-independent
+  rules — the hero is a dark gradient in both themes, but the button variants flipped with the
+  theme, leaving near-black text on the gradient in dark mode.
 - **Site chrome is shared, and the site is themed rather than hand-styled.** `pages/site.js` now owns
   the design tokens, header/nav, theme toggle, footer, and router for every page; a page supplies only
   its routes and views, so no page can drift from the others. The look is derived by `bw.loadStyles()`
