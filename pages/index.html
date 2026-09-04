@@ -306,24 +306,28 @@
 
   function paintMarked() {
     bw.DOM('#markedBox', control(bw.makeTextarea({
-      rows: 8,
+      rows: 9,
       value: tr.marked,
       placeholder: 'The watermarked copy appears here. Edit it, or paste other text, then recover.'
     }), 'oninput', function (e) { tr.marked = e.target.value; }));
   }
 
   function paintFound() {
-    if (tr.found === undefined) { bw.DOM('#recOut', { t: 'span' }); return; }
-    bw.DOM('#recOut', tr.found
-      ? { t: 'div', a: { class: 'recovered' }, c: [
-          bw.makeBadge({ text: 'recovered', variant: 'success' }),
-          { t: 'b', c: tr.found }
-        ] }
-      : { t: 'div', a: { class: 'recovered' }, c: [
-          bw.makeBadge({ text: 'nothing found', variant: 'light' }),
-          { t: 'span', a: { style: bw.s({ opacity: '.7', fontSize: '14px' }) },
-            c: 'No watermark in that text — or it was stripped.' }
-        ] });
+    var body;
+    if (tr.found === undefined) {
+      body = { t: 'span', a: { class: 'muted' }, c: 'Press Recover to read it back.' };
+    } else if (tr.found) {
+      body = { t: 'span', a: { class: 'hit' }, c: [
+        bw.makeBadge({ text: 'found', variant: 'success' }),
+        { t: 'b', c: tr.found }
+      ] };
+    } else {
+      body = { t: 'span', a: { class: 'hit' }, c: [
+        bw.makeBadge({ text: 'nothing', variant: 'light' }),
+        { t: 'span', a: { class: 'muted' }, c: 'No watermark in that text — or it was stripped.' }
+      ] };
+    }
+    bw.DOM('#recOut', { t: 'div', a: { class: 'readout' }, c: body });
   }
 
   function doWatermark() {
@@ -371,26 +375,26 @@
       tight: true,
       title: 'Watermark a paragraph',
       lede: 'Text and a secret go in. The copy reads the same — and the secret comes back out of it.',
-      content: { t: 'div', a: { class: 'grid2' }, c: [
+      content: { t: 'div', a: { class: 'grid2 grid-even' }, c: [
 
-        bw.makeCard({ title: '1 · Original', shadow: 'sm', content: { t: 'div', c: [
-          field('Text to watermark', control(bw.makeTextarea({ rows: 8, value: tr.cover }),
+        bw.makeCard({ title: 'Original', shadow: 'sm', content: { t: 'div', a: { class: 'stage' }, c: [
+          field('Text to watermark', control(bw.makeTextarea({ rows: 9, value: tr.cover }),
             'oninput', function (e) { tr.cover = e.target.value; })),
           field('Secret to hide', bw.makeInput({ type: 'text', value: tr.secret,
             oninput: function (e) { tr.secret = e.target.value; } })),
-          { t: 'div', c: bw.makeButton({ text: 'Watermark it →', variant: 'primary', onclick: doWatermark }) },
-          { t: 'div', a: { id: 'tryNote', style: bw.s({ marginTop: '14px' }) } }
+          { t: 'div', a: { class: 'acts' }, c: bw.makeButton({ text: 'Watermark it →', variant: 'primary', onclick: doWatermark }) },
+          { t: 'div', a: { id: 'tryNote', class: 'foot-note' } }
         ] } }),
 
-        bw.makeCard({ title: '2 · Watermarked', shadow: 'sm', content: { t: 'div', c: [
+        bw.makeCard({ title: 'Watermarked', shadow: 'sm', content: { t: 'div', a: { class: 'stage' }, c: [
           field('Watermarked copy — editable', { t: 'div', a: { id: 'markedBox' } }),
-          { t: 'div', a: { style: bw.s({ display: 'flex', gap: '8px', flexWrap: 'wrap' }) }, c: [
+          field('Recovered secret', { t: 'div', a: { id: 'recOut' } }),
+          { t: 'div', a: { class: 'acts' }, c: [
             bw.makeButton({ text: 'Recover →', variant: 'primary', onclick: doRecover }),
             bw.makeButton({ text: 'Copy', variant: 'outline-secondary',
               onclick: function () { if (tr.marked && navigator.clipboard) navigator.clipboard.writeText(tr.marked); } })
           ] },
-          { t: 'div', a: { id: 'recOut' } },
-          { t: 'p', a: { style: bw.s({ marginTop: '16px', fontSize: '13.5px', opacity: '.7' }) },
+          { t: 'p', a: { class: 'foot-note hint' },
             c: 'Edit a few words above and recover again — the mark survives ordinary editing.' }
         ] } })
       ] }

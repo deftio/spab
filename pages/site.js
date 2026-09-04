@@ -227,10 +227,24 @@
       // the demo stops contradicting the copy next to it.
       '.grid2 textarea': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
         fontSize: '13.5px', lineHeight: '1.75' },
-      '.recovered': { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
-        fontSize: '15px', marginTop: '12px' },
-      '.recovered b': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
-        fontSize: '16px' },
+      // The two demo panels mirror each other row for row — text box, single-value
+      // box, actions, note — so they are the same size by default. Equal card
+      // height is safe here (unlike a pair holding different amounts) precisely
+      // because the contents are mirrored, so nothing leaves a void.
+      '.grid-even': { alignItems: 'stretch' },
+      '.grid-even > .bw_bccl_card': { height: '100%' },
+      '.stage': { display: 'flex', flexDirection: 'column', height: '100%' },
+      '.stage .acts': { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 'auto' },
+      '.stage .foot-note': { marginTop: '12px', minHeight: '44px', fontSize: '13.5px' },
+      '.stage .hint': { opacity: '.7', margin: '12px 0 0' },
+
+      // Same metrics as a form control, so it lines up with the secret field opposite.
+      '.readout': { display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap',
+        minHeight: '41px', padding: '7px 12px', borderRadius: '10px', boxSizing: 'border-box' },
+      '.readout .hit': { display: 'inline-flex', alignItems: 'center', gap: '9px' },
+      '.readout b': { fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+        fontSize: '14.5px' },
+      '.readout .muted': { fontSize: '13.5px', opacity: '.6' },
 
       '@media (max-width: 880px)': {
         '.hero .wrap': { padding: '26px 20px 28px' }
@@ -286,6 +300,7 @@
       '.eyebrow': { color: p.primary.base, opacity: '.9' },
 
       '.spab-view': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
+      '.readout': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
       '.pmark': { background: p.secondary.base, color: '#fff' },
       '.code': { background: p.surface, border: '1px solid ' + p.light.border, color: p.dark.base },
 

@@ -76,6 +76,10 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   which the measurements do not yet establish; the site now says "watermark plain text". Second
   person is gone from the headline, section copy and field labels. The version beside the wordmark
   is read from `SPAB.VERSION` at runtime, so it cannot drift from the package. Nav type enlarged.
+- **The two demo panels mirror each other** — title, text box, single-value box, actions, note — so
+  they are the same size by default (cards 590/590, text boxes 231/231, secret and recovered both
+  41px). Equal card height is safe here precisely because the contents are mirrored; the earlier
+  pair held very different amounts and had to size to content to avoid a void.
 - **The try-it demo is two stages instead of two separate tools:** original + secret on the left,
   watermarked + recovered on the right. The watermarked box is editable and is the same field
   recovery reads from, so the text can be mangled in place and recovered again — surviving ordinary
