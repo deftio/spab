@@ -86,6 +86,33 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   that runs on the 1st of each quarter, compares pinned GitHub Actions against their latest releases,
   and opens a tracking issue only when something is behind. spab has zero package dependencies, so
   action pins are the only thing that drifts.
+- **GitHub Actions pins bumped to v7** across all five workflows: `actions/checkout@v4`→`@v7`,
+  `actions/setup-node@v4`→`@v7`, `actions/setup-python@v5`→`@v7` (final Dependabot PR, merged; the
+  quarterly checker now reports all pins current).
+- **Scripted release pipeline (`npm run release`).** `tools/start-release.js` opens a release cycle
+  (bump all three version surfaces, promote `[Unreleased]` to a dated section, branch
+  `release/vX.Y.Z`); `tools/release.js` runs every gate — lint, conformance + branch tests, smokes,
+  fuzz, and strict coverage, the last two blocking locally though still report-only in CI — then
+  pushes the branch, opens the PR, and arms auto-merge. It never pushes to `main` and never merges:
+  branch protection and CI stay the authority, and the script only front-loads the failures.
+  `npm run release:dry` rehearses the whole thing with zero mutations.
+- **Identity gate before anything mutates (`npm run whoami`).** More than one GitHub account can be
+  authenticated at once and `gh` has a single active one, so a stale switch silently opens PRs under
+  the wrong name. `tools/gh-identity.js` asserts the `gh` account, the git commit identity, and the
+  SSH key GitHub sees all resolve to the maintainer, and bails with the exact fix command otherwise.
+- **Branch protection applied to `main`** (it was documented but never enabled): PR required with 0
+  approvals, the four CI checks required and branches kept up to date, force-pushes and deletions
+  blocked, admins included, squash-only merging, auto-merge on. See `RELEASING.md`.
+- **CI version check now covers all three version surfaces.** `ci.yml` compared only `spab.js` to
+  `src/js/package.json`, so a PR that missed the root `package.json` passed every required check and
+  failed later at release time with `main` already inconsistent.
+- **`.nojekyll`** at the repo root — Pages serves from `main` with the legacy Jekyll build, which
+  silently drops underscore-prefixed paths (`src/python/spab/__init__.py`).
+- **Commit-message hygiene gate.** A conversation/session identifier in a commit message is
+  permanent once pushed — the object stays fetchable by SHA, the PR timeline keeps the record, and a
+  revert adds a commit rather than removing one. `tools/release.js` now refuses to push when the
+  branch's commits contain one (the last moment `--amend` still works), and a `commit hygiene` CI job
+  backstops commits that arrive any other way.
 
 ### Removed
 - `.github/dependabot.yml` (superseded by the quarterly workflow above).
