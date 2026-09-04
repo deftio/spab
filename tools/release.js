@@ -79,7 +79,8 @@ if (argv.indexOf('--help') !== -1 || argv.indexOf('-h') !== -1) {
     'Gates (all blocking):',
     '  identity      gh + git + ssh must all be the maintainer',
     '  clean tree    no uncommitted changes',
-    '  not on main   main is protected; work happens on a branch',
+    '  not on main   main is protected; work happens on a branch. If you have',
+    '                commits stranded on main, it offers to move them to one.',
     '  versions      package.json / src/js/package.json / spab.js agree',
     '  messages      no session/conversation identifiers in commit messages',
     '  lint          npm run lint',
@@ -111,11 +112,61 @@ c.step('2. Preflight');
 
 if (DRY_RUN) console.log('  *** DRY RUN — every gate runs, nothing is pushed ***');
 
-const branch = c.currentBranch();
+var branch = c.currentBranch();
 if (branch === 'main' || branch === 'master') {
-  c.fail('Cannot release from ' + branch + '.\n' +
-    '  main is protected — work happens on a branch and lands by PR.\n' +
-    '  For a release: npm run start-release -- <patch|minor|major>');
+  // Committing on main is an easy mistake and, with branch protection on, a dead
+  // end: the push is rejected and the work sits there with nothing obvious to do
+  // about it. Rather than refuse and leave the user to work out the git, offer to
+  // move those commits onto a branch and carry on into the normal PR flow.
+  c.run('git fetch origin ' + branch + ' --quiet');
+  const stranded = (c.tryQuiet('git log origin/' + branch + '..HEAD --oneline') || '')
+    .split('\n').filter(Boolean);
+
+  if (stranded.length === 0) {
+    c.fail('Cannot release from ' + branch + ' — there is nothing here to release.\n' +
+      '  Work happens on a branch and lands by PR.\n' +
+      '  For a release: npm run start-release -- <patch|minor|major>');
+  }
+
+  console.log('\n  ' + stranded.length + ' commit(s) on ' + branch + ' that cannot be pushed:');
+  for (const line of stranded) console.log('    ' + line);
+  console.log('  ' + branch + ' is protected, so these can only land through a PR.\n');
+
+  // A dry run must not mutate, and moving commits is a mutation — so describe it
+  // and stop rather than quietly rewriting history during a rehearsal.
+  if (DRY_RUN) {
+    c.skipped('move ' + stranded.length + ' commit(s) off ' + branch + ' onto a new branch');
+    console.log('\n  Re-run without --dry-run to move them and open the PR.\n');
+    process.exit(0);
+  }
+
+  if (!YES && !c.askYesNo('  Move them to a branch and continue? (y/n) ')) {
+    c.fail('Left as they are. To do it by hand:\n' +
+      '    git branch <name> && git reset --hard origin/' + branch);
+  }
+
+  // Name it from the newest commit's subject, which is the best description of
+  // the work available without asking.
+  const subject = c.tryQuiet('git log -1 --format=%s') || 'work';
+  const suggested = (/^(feat|fix|docs|test|refactor|perf|ci|chore)(\(|:)/.test(subject)
+    ? subject.split(/[(:]/)[0] : 'chore') + '/' + c.slugify(subject.replace(/^[a-z]+(\([^)]*\))?:\s*/, ''));
+
+  const entered = YES ? '' : c.askLine('  Branch name [' + suggested + ']: ');
+  const target = entered || suggested;
+
+  if (c.tryQuiet('git rev-parse -q --verify ' + JSON.stringify(target)) !== null) {
+    c.fail('Branch "' + target + '" already exists — re-run and choose another name.');
+  }
+
+  // Create the branch at the current commit FIRST, then rewind main. Doing it in
+  // this order means the commits are already safely referenced by the new branch
+  // before anything is reset, so an interruption cannot lose them.
+  c.run('git branch ' + target);
+  c.run('git reset --hard origin/' + branch);
+  c.run('git checkout ' + target);
+
+  branch = target;
+  c.ok('moved ' + stranded.length + ' commit(s) to ' + target + '; ' + 'main is back at origin');
 }
 c.ok('on branch ' + branch);
 
