@@ -300,6 +300,28 @@
   // the result out of one card and into a separate paste box.
   var tr = { cover: TRY_SAMPLE, secret: 'acme-42', marked: '', note: null, kind: 'info', found: undefined };
 
+  // Light counts under each box. Chars and words being identical on both sides is
+  // the length-preservation claim, shown rather than asserted; the site count is
+  // what actually determines how much a passage can hold.
+  function statsLine(text, opts) {
+    var words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    var nonSpace = text.replace(/\s/g, '').length;
+    var parts = [
+      text.length + ' chars',
+      words + ' words',
+      nonSpace + ' non-space'
+    ];
+    if (opts && opts.sites !== undefined) parts.push(opts.sites + ' carrier sites');
+    return { t: 'p', a: { class: 'stats' }, c: parts.join('  ·  ') };
+  }
+
+  function paintStats() {
+    var sites = null;
+    try { sites = SPAB.getSites(tr.cover, TRY_PARAMS).length; } catch (e) { sites = undefined; }
+    bw.DOM('#statsIn', statsLine(tr.cover, { sites: sites }));
+    bw.DOM('#statsOut', tr.marked ? statsLine(tr.marked) : { t: 'span' });
+  }
+
   function paintTryNote() {
     bw.DOM('#tryNote', tr.note ? bw.makeAlert({ variant: tr.kind, content: bw.raw(tr.note) }) : { t: 'span' });
   }
@@ -309,7 +331,7 @@
       rows: 9,
       value: tr.marked,
       placeholder: 'The watermarked copy appears here. Edit it, or paste other text, then recover.'
-    }), 'oninput', function (e) { tr.marked = e.target.value; }));
+    }), 'oninput', function (e) { tr.marked = e.target.value; paintStats(); }));
   }
 
   function paintFound() {
@@ -356,7 +378,7 @@
         ' bits and the best channel holds ' + md.capacityBits +
         '. Add a sentence or two, or use a shorter secret.';
     }
-    paintMarked(); paintFound(); paintTryNote();
+    paintMarked(); paintFound(); paintTryNote(); paintStats();
   }
 
   function doRecover() {
@@ -387,7 +409,8 @@
 
         bw.makeCard({ title: 'Original', shadow: 'sm', content: { t: 'div', a: { class: 'stage' }, c: [
           field('Text to watermark', control(bw.makeTextarea({ rows: 9, value: tr.cover }),
-            'oninput', function (e) { tr.cover = e.target.value; })),
+            'oninput', function (e) { tr.cover = e.target.value; paintStats(); })),
+          { t: 'div', a: { id: 'statsIn' } },
           field('Secret to hide', bw.makeInput({ type: 'text', value: tr.secret,
             oninput: function (e) { tr.secret = e.target.value; } })),
           { t: 'div', a: { class: 'acts' }, c: bw.makeButton({ text: 'Watermark it →', variant: 'primary', onclick: doWatermark }) },
@@ -396,14 +419,19 @@
 
         bw.makeCard({ title: 'Watermarked', shadow: 'sm', content: { t: 'div', a: { class: 'stage' }, c: [
           field('Watermarked copy — editable', { t: 'div', a: { id: 'markedBox' } }),
-          field('Recovered secret', { t: 'div', a: { id: 'recOut' } }),
+          { t: 'div', a: { id: 'statsOut' } },
+          // The action sits between the text it reads and the value it produces,
+          // so the panel reads top to bottom in the order it actually happens.
           { t: 'div', a: { class: 'acts' }, c: [
             bw.makeButton({ text: 'Recover →', variant: 'primary', onclick: doRecover }),
             bw.makeButton({ text: 'Copy', variant: 'outline-secondary',
               onclick: function () { if (tr.marked && navigator.clipboard) navigator.clipboard.writeText(tr.marked); } })
           ] },
+          field('Recovered secret', { t: 'div', a: { id: 'recOut' } }),
           { t: 'p', a: { class: 'foot-note hint' },
-            c: 'Edit a few words above and recover again — the mark survives ordinary editing.' }
+            c: bw.raw('Rewording in place survives — replace a word with one of the same shape and recover again. ' +
+              '<b>Adding or deleting words does not:</b> it shifts every carrier position after the edit. See ' +
+              '<a href="#/how">How it works</a>.') }
         ] } })
       ] }
     });

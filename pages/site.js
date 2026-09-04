@@ -244,9 +244,11 @@
       '.grid-even': { alignItems: 'stretch' },
       '.grid-even > .bw_bccl_card': { height: '100%' },
       '.stage': { display: 'flex', flexDirection: 'column', height: '100%' },
-      '.stage .acts': { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 'auto' },
-      '.stage .foot-note': { marginTop: '12px', minHeight: '44px', fontSize: '13.5px' },
-      '.stage .hint': { opacity: '.8', margin: '12px 0 0' },
+      '.stage .acts': { display: 'flex', gap: '8px', flexWrap: 'wrap', margin: '4px 0 16px' },
+      '.stage .foot-note': { marginTop: 'auto', paddingTop: '14px', minHeight: '44px', fontSize: '13.5px' },
+      '.stage .hint': { opacity: '.8', marginBottom: '0' },
+      '.stats': { margin: '-4px 0 12px', fontSize: '12.5px', letterSpacing: '.01em',
+        fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', opacity: '.72' },
 
       // Same metrics as a form control, so it lines up with the secret field opposite.
       '.readout': { display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap',
@@ -381,6 +383,24 @@
     }
   }
 
+  // Hash routes are not page loads, so the analytics snippet never sees them: the
+  // whole site would report as a single hit on the entry URL. Count each route
+  // explicitly. Guarded throughout — the script is async and blocked by plenty of
+  // browsers, and analytics must never be able to break the page.
+  var lastCounted = null;
+  function countView(path) {
+    try {
+      if (!root.goatcounter || typeof root.goatcounter.count !== 'function') return;
+      if (path === lastCounted) return;          // no double counting on re-render
+      lastCounted = path;
+      root.goatcounter.count({
+        path: (root.location.pathname || '') + '#' + path,
+        title: SITE.brand + ' — ' + path,
+        event: false
+      });
+    } catch (e) { /* analytics is never load-bearing */ }
+  }
+
   function navTree() {
     var links = SITE.nav.map(function (n) {
       var cls = 'navlink' + (n.path === state.path ? ' is-active' : '');
@@ -476,6 +496,7 @@
         state.path = (e && e.path) || '/';
         paintNav();
         try { root.scrollTo(0, 0); } catch (err) { /* non-browser host */ }
+        countView(state.path);
       });
 
       // The router MUST exist before any chrome is painted. bw.link() emits a

@@ -71,6 +71,18 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   applies the `main` protection documented in `RELEASING.md` via `gh`.
 
 ### Changed
+- **Analytics on every page, including hash routes.** The site is a hash-routed single page, so the
+  stock GoatCounter snippet only ever counted the entry URL — every visit looked like one hit on
+  `/pages/`. `site.js` now counts each route change as its own view, guarded so a blocked or absent
+  analytics script can never break the page.
+- **Light counts under each demo box** — chars, words, non-space characters, and the carrier-site
+  count on the input side. The two sides showing identical chars/words is the length-preservation
+  claim demonstrated rather than asserted.
+- **Corrected a false claim in the demo.** The hint read "the mark survives ordinary editing". It
+  does not: deleting or inserting a word shifts every carrier position after the edit and recovery
+  fails at every redundancy level measured (1x, 2x, 4x, 11x). Rewording in place does survive. The
+  hint now says which is which and links to `How it works`.
+- **Recover sits above the recovered secret**, between the text it reads and the value it produces.
 - **Front page copy and demo reworked.** Headline is now "Mark a document without changing how it
   reads" — the previous one said "Invisibly", and the tagline claimed *robust* text watermarking,
   which the measurements do not yet establish; the site now says "watermark plain text". Second
