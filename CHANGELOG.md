@@ -71,6 +71,23 @@ are development milestones of the JavaScript reference implementation (`src/js/s
   applies the `main` protection documented in `RELEASING.md` via `gh`.
 
 ### Changed
+- **Site chrome is shared, and the site is themed rather than hand-styled.** `pages/site.js` now owns
+  the design tokens, header/nav, theme toggle, footer, and router for every page; a page supplies only
+  its routes and views, so no page can drift from the others. The look is derived by `bw.loadStyles()`
+  from one token object (seed colors, radius, elevation, spacing, type scale) instead of a hand-written
+  stylesheet, and light/dark comes from the generated alternate palette via `bw.setThemeMode()` — the
+  shell CSS is emitted twice, once per palette, so the page furniture themes with the components.
+  Navigation uses `bw.router()` + `bw.link()` (real history, deep links, working middle-click) in place
+  of a `hashchange` listener and an if/else chain, and the nav tracks its own active state by
+  subscribing to `bw:route`. Views are built from real components — `makeHero`, `makeFeatureGrid`,
+  `makeStatCard`, `makeCTA`, `makeAccordion`, `makeCard`, `makeFormGroup`, `makeInput`/`makeSelect`/
+  `makeTextarea` — rather than hand-assembled `div` trees, plus a gradient hero and an install strip
+  in the style of the bitwrench sites.
+- **Fixed: every form control on the playground was unstyled.** The page hardcoded 1.x-era class
+  names (`bw_form_control`, `bw_badge`) while loading `bitwrench@2` from the CDN. Those classes are
+  BCCL-prefixed in 2.x and have no rules at all, so the inputs, selects and badges had been rendering
+  as bare browser defaults — the labels sat on top of their own fields and the metadata lines ran
+  together as one string. Building them with the `make*()` factories fixes it and keeps it fixed.
 - **Branching & merging etiquette** documented in `CONTRIBUTING.md` (trunk-based, `type/desc`
   branches, Conventional Commits, squash-merge to linear history, PR + green CI), with a
   `.github/pull_request_template.md`. Releases are a version-bump PR to `main` (auto-cut), not manual
