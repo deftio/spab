@@ -7,6 +7,13 @@ the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
 
+### Changed
+- **npm publishing uses OIDC trusted publishing — no token, no secret.** `publish.yml` declares
+  `id-token: write`, and npm verifies that identity against the trusted publisher registered on the
+  package, so releases upload with a provenance attestation tying the tarball to the commit and run
+  that produced it. The old `NPM_TOKEN` guard (which made the job a silent no-op) is gone, and the
+  job now skips cleanly when the version is already published instead of failing a re-run.
+
 ## [0.4.1] — 2026-09-04
 
 ### Added

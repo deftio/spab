@@ -1,16 +1,16 @@
 name: Publish
 
-# Package publishing — INERT until credentials are added.
+# Package publishing. Runs when a GitHub Release is published (release-on-bump.yml
+# creates it), or manually from the Actions tab.
 #
-# Triggered when a GitHub Release is published (see release.yml, which the tag push
-# creates). Each ecosystem job runs a credential-free packaging check (proof the
-# package is publishable) and performs a REAL publish only when its token secret is
-# present. No secrets configured yet ⇒ these jobs package-check and stop, never fail.
+# npm publishes with NO SECRET. It uses OIDC trusted publishing: GitHub mints a
+# short-lived identity token for this workflow, npm verifies it against the trusted
+# publisher registered on the package (repo deftio/spab, workflow publish.yml), and
+# the upload carries a provenance attestation tying the tarball to this commit and
+# run. Nothing to rotate, nothing to leak. Renaming or moving this file breaks the
+# match and publishing will fail until the trusted publisher is updated.
 #
-# To go live later, add repo secrets:
-#   NPM_TOKEN   — npm automation token for @deftio/spab
-#   PYPI_TOKEN  — PyPI API token for the spab project
-# (and, when the ports are implemented, equivalents for crates.io / Maven Central).
+# PyPI is still token-gated and inert until PYPI_TOKEN exists and the port is real.
 
 on:
   release:
@@ -21,33 +21,44 @@ jobs:
   npm:
     name: npm (@deftio/spab)
     runs-on: ubuntu-latest
-    env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}   # hoisted so the `if:` guards can read it
+    permissions:
+      contents: read
+      id-token: write        # the OIDC token IS the credential — no secret needed
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      # Always: prove the package builds and would publish cleanly (no token needed).
-      - name: Pack check (dry run)
+      - name: Pack check
+        working-directory: src/js
+        run: npm pack --dry-run
+
+      # Publishing the same version twice is a hard error, and a re-run of a release
+      # (or a manual dispatch after a successful publish) would otherwise fail the
+      # whole workflow for no reason. Check first and skip if it is already up.
+      - name: Is this version already on npm?
+        id: check
         working-directory: src/js
         run: |
-          npm pack --dry-run
-          echo "packaged @deftio/spab ok (dry run)"
+          NAME=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VER" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "$NAME@$VER is already published — nothing to do."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "$NAME@$VER is not on npm yet."
+          fi
 
-      # Only when a token exists: the real publish. Skipped silently otherwise.
-      - name: Publish to npm
-        if: ${{ env.NPM_TOKEN != '' }}
+      # `npx npm@latest` on purpose: OIDC trusted publishing needs a newer npm than
+      # the runner ships, and silently falling back to an old npm would try to read a
+      # token that does not exist.
+      - name: Publish to npm (OIDC trusted publishing)
+        if: steps.check.outputs.published == 'false'
         working-directory: src/js
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
-
-      - name: Note (no token)
-        if: ${{ env.NPM_TOKEN == '' }}
-        run: echo "NPM_TOKEN not set — dry run only. Add the secret to enable publishing."
+        run: npx -y npm@latest publish --provenance --access public
 
   pypi:
     name: PyPI (spab)
