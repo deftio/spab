@@ -13,10 +13,17 @@ two words, whether an apostrophe is straight or curly, whether a dash is a hyphe
 Unicode hyphen. The words are untouched, so the text reads exactly as it did before.
 
 Error correction is what makes that useful. A mark that breaks on the first edit is a curiosity;
-spab spreads the payload across several independent carriers and adds redundancy, so it survives
-copy/paste, reformatting, and Unicode normalization. The carriers are chosen to fail on *different*
-edits — normalization erases the whitespace channel but leaves the punctuation one, and a
-smart-quote autocorrect does the reverse.
+spab spreads the payload across several independent carriers and adds redundancy. The carriers are
+chosen to fail on *different* edits — normalization erases the whitespace channel but leaves the
+punctuation one, and a smart-quote autocorrect does the reverse.
+
+Editing the words is the harder case. Inserting or deleting one usually changes the number of
+carrier sites, shifting the whole symbol stream so that everything after the edit reads as noise —
+and redundancy alone cannot help, because every copy shifts with it. The decoder resynchronises
+instead: it re-cuts the symbol blocks at each phase and looks for intact frames wherever they
+landed. Whether that recovers the payload depends on having spare capacity to fall back on
+(`metadata.reps` reports how many copies fit), so robustness is bought with text length, not
+wished for.
 
 The underlying idea is ordinary information theory. Text carries spare entropy: equivalent ways of
 writing the same thing. spab measures how much a passage has, spends part of it on a signal, and

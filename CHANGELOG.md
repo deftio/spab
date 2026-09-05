@@ -7,6 +7,33 @@ the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
 
+### Fixed
+- **The decoder now resynchronises after an edit that adds or removes a carrier site.** Deleting a
+  word usually collapses two gaps into one, removing a site and shifting the whole symbol stream;
+  blocks are cut from that stream by index, so every block after the edit decoded to noise. Adding
+  redundancy never helped because every copy shifted together — measured identically broken at 1x,
+  2x, 4x and 11x. The packets were never destroyed, only mislocated: `parsePackets` read fixed
+  32-bit slots from offset 0 and `foldParse` assumed the frame began at bit 0.
+
+  Decoding now re-cuts the block grid at each phase (up to 32, the largest block spab produces).
+  RLNC pools packets from every phase, and repetition falls back to scanning for one intact
+  self-contained frame when majority folding fails — folding otherwise averages intact copies
+  together with shifted noise. Phase 0 is tried first, so undamaged input decodes exactly as
+  before. Windows stay 32-bit aligned: scanning every bit offset instead surfaced ~8 chance CRC8
+  hits per document, and one false packet poisons the RLNC solve. Unmarked text still yields
+  nothing. Resync is disabled when `params.key` is set, since the keyed interleave spans the whole
+  stream and cannot be undone on a shifted one.
+
+  Measured on the research harness (same seeded corpus, 600 docs): cut/paste at 75% kept 2% -> 17%,
+  at 50% kept 0% -> 6%; word deletion at p=0.05 3% -> 6%; word insertion 3% -> 7%. Recovery still
+  requires spare capacity — a passage holding exactly one copy has nothing to fall back on, which
+  is why the front-page demo sample is now long enough for three.
+- **`tests/coverage.js` reported covered code as uncovered.** V8 emits a coarse zero-count range in
+  a process where a region was skipped and finer nested ranges where parts of it ran, so the same
+  code produced different `[start,end)` keys per test file and the two could never cancel. A coarse
+  zero-range from one file therefore outvoted another file that executed every statement inside it.
+  Coverage is now resolved per source offset across processes. This was blocking a legitimate 100%.
+
 ### Changed
 - **npm publishing uses OIDC trusted publishing — no token, no secret.** `publish.yml` declares
   `id-token: write`, and npm verifies that identity against the trusted publisher registered on the

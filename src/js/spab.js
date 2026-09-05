@@ -151,12 +151,35 @@
 
   // Read one class's bit stream from its own sites (independent channel). Insert-kind
   // carriers (zero-width) recover their bits by extraction rather than site reads.
-  function readClassBits(text, id, key, maxSites) {
+  function classDigits(text, id) {
     var def = CLASS_DEFS[id], digits;
     if (def.kind === 'ins') digits = def.extract(text);
     else { var idx = def.detect(text); digits = new Array(idx.length); for (var s = 0; s < idx.length; s++) digits[s] = def.read(text, idx[s]); }
+    return digits;
+  }
+  function readClassBits(text, id, key, maxSites) {
+    var def = CLASS_DEFS[id], digits = classDigits(text, id);
     if (key) digits = descramble(digits, def.radix, keySeed(key, id)); // invert keyed scramble
     return symbolsToBits(digits, filledRadices(digits.length, def.radix), maxSites);
+  }
+
+  // ---------- resynchronisation ----------
+  // Inserting or deleting a carrier site (deleting a word usually collapses two
+  // gaps into one) shifts the whole symbol stream. Blocks are cut from that stream
+  // by index, so every block after the edit is cut one position off and decodes to
+  // noise — which is why raising redundancy never helped: the extra copies were
+  // shifted too. Re-cutting the grid at each phase restores the original block
+  // boundaries for whatever follows the edit.
+  //
+  // Phases are tried on the RAW digit stream, and only when unkeyed: the keyed
+  // scramble interleaves across the whole stream, so a shifted stream cannot be
+  // descrambled and sweeping it would produce noise.
+  var MAX_PHASE = 32;   // largest block length spab produces (radix-2 packs 32 sites)
+  function phaseCount(key, n) { return key ? 1 : Math.min(MAX_PHASE, n); }
+  function phaseBits(digits, ph, def, key, id, maxSites) {
+    var d = ph ? digits.slice(ph) : digits;
+    if (key) d = descramble(d, def.radix, keySeed(key, id));
+    return symbolsToBits(d, filledRadices(d.length, def.radix), maxSites);
   }
 
   // ---------- GF(256) + systematic RLNC fountain (ecc:'rlnc') ----------
@@ -460,13 +483,44 @@
       message: crcOk ? message : null, confidence: crcOk ? 1 : 0, payloadBytes: dlen, crcOk: crcOk, rawMessage: message }, extra || {});
   }
 
+  // Look for one intact frame anywhere in the stream, across block-grid phases and
+  // byte-aligned starts. Frames are self-contained and CRC-checked, so an intact
+  // copy needs no agreement from its neighbours — this is what recovers a payload
+  // whose later copies were shifted by an edit.
+  function scanFrame(text, id, key, maxSites) {
+    var def = CLASS_DEFS[id], digits = classDigits(text, id), phases = phaseCount(key, digits.length);
+    for (var ph = 0; ph < phases; ph++) {
+      var bits = phaseBits(digits, ph, def, key, id, maxSites);
+      var bytes = bitsToBytes(bits);
+      for (var o = 0; o + 4 <= bytes.length; o++) {
+        if (bytes[o] !== MAGIC) continue;
+        var dlen = bytes[o + 1];
+        if (dlen < 1 || o + 2 + dlen >= bytes.length) continue;
+        var content = bytes.slice(o + 2, o + 2 + dlen);
+        if (bytes[o + 2 + dlen] !== crc8(bytes.slice(o, o + 2 + dlen))) continue;
+        var message = null;
+        try { message = utf8Decode(content); } catch (e) { message = null; } // cov-ignore: TextDecoder is non-fatal
+        return { status: 'corrected', message: message, confidence: 0.75, agreement: 1,
+          reps: 1, payloadBytes: dlen, crcOk: true, rawMessage: message, resynced: true };
+      }
+    }
+    return null;
+  }
+
   // RLNC decode: pool self-checking packets from ALL channels, recover any K.
   function decodeRLNC(text, ids, key, maxSites) {
     var pool = {}, count = 0;
     ids.forEach(function (id) {
-      parsePackets(readClassBits(text, id, key, maxSites)).forEach(function (pk) {
-        if (!(pk.esi in pool)) { pool[pk.esi] = pk.val; count++; }
-      });
+      var def = CLASS_DEFS[id], digits = classDigits(text, id), phases = phaseCount(key, digits.length);
+      // Phase 0 first, so an undamaged stream pools exactly the packets it always
+      // did; later phases only add what a shift had hidden. Packets stay on 32-bit
+      // boundaries within a phase — scanning every bit offset instead finds ~8
+      // false packets per document, and one false packet poisons the solve.
+      for (var ph = 0; ph < phases; ph++) {
+        parsePackets(phaseBits(digits, ph, def, key, id, maxSites)).forEach(function (pk) {
+          if (!(pk.esi in pool)) { pool[pk.esi] = pk.val; count++; }
+        });
+      }
     });
     if (count < 4) return { status: 'not-detected', message: null, confidence: 0, crcOk: false, packets: count };
     var packets = Object.keys(pool).map(function (e) { return { esi: +e, val: pool[e] }; });
@@ -500,6 +554,11 @@
     var best = null, bestId = null;
     ids.forEach(function (id) {
       var c = foldParse(readClassBits(text, id, key, maxSites));
+      // Majority voting assumes every copy starts where the first one did. After an
+      // insertion or deletion the later copies are shifted, and folding averages
+      // intact copies together with noise. A single self-contained frame
+      // (magic/len/content/crc) is enough on its own, so go looking for one.
+      if (!c.crcOk) { var r = scanFrame(text, id, key, maxSites); if (r) c = r; }
       var better = !best ||
         (c.crcOk && !best.crcOk) ||
         (c.crcOk === best.crcOk && (rank[c.status] > rank[best.status] ||
@@ -547,7 +606,11 @@
     ecc: { type: 'repetition+majority', detail: 'frame repeated to fill capacity, per-bit majority vote' },
     frame: { fields: ['magic(0xA5)', 'len(1B)', 'content', 'crc8'], integrity: 'crc8', sync: 'magic byte' },
     modem: { type: 'mixed-radix', blocked: true, blockCapBits: 32, note: 'ECC bit stream is packed into per-site carrier symbols by blocked mixed-radix (base) conversion, recovering fractional bits of non-power-of-two radices; blocks bound a damaged symbol to ≤32 bits' },
-    coding: { symbolLayer: 'mixed-radix (blocked)', blocks: true, interleave: 'keyed (opt-in)', pn: 'keyed (opt-in)', softDecision: false }
+    coding: { symbolLayer: 'mixed-radix (blocked)', blocks: true, interleave: 'keyed (opt-in)', pn: 'keyed (opt-in)', softDecision: false },
+    resync: {
+      phases: MAX_PHASE,
+      note: 'Inserting or deleting a carrier site shifts the whole symbol stream, so blocks are cut one position off and everything after the edit decodes to noise — redundancy does not help, because every copy shifts together. The decoder therefore re-cuts the block grid at each phase: RLNC pools packets from all phases (32-bit aligned, so chance CRC hits stay out of the solve), and repetition falls back to scanning for one intact self-contained frame when majority folding fails. Disabled when a key is set: the keyed interleave spans the whole stream and cannot be undone on a shifted one.'
+    }
   };
 
   var SPAB = {

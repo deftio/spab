@@ -90,6 +90,20 @@ SPAB.encode(text, msg, { ecc: 'rlnc' });         // GF(256) fountain; packets po
 self-checking, self-locating packets that pool across *all* channels, so surviving carriers can
 reconstruct the whole message. Both are dependency-free and hand-rolled.
 
+### Edits that add or remove text
+
+Inserting or deleting a word usually changes the number of carrier sites, which shifts the whole
+symbol stream — everything after the edit would otherwise decode to noise, no matter how much
+redundancy was spent. The decoder resynchronises: it re-cuts the block grid at each phase, pooling
+RLNC packets from every phase and, for repetition, scanning for one intact self-contained frame.
+
+Recovery still depends on having spare capacity. A passage that holds exactly one copy of the
+payload has nothing to fall back on when part of it is disturbed; give the text room for two or
+three copies and edits become survivable. `metadata.reps` tells you how many copies fit.
+
+Resynchronisation is disabled when `params.key` is set — the keyed interleave spans the whole
+stream and cannot be undone on a shifted one.
+
 ## Optional keyed scramble
 
 ```js

@@ -286,10 +286,17 @@
   // choose something before seeing it work has been left out.
   var TRY_PARAMS = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
 
+  // Long enough to hold several copies of the payload. A passage that fits exactly
+  // one copy cannot survive an edit no matter how good the decoder is, and a demo
+  // that invites editing should not be built on one.
   var TRY_SAMPLE = 'Every document carries more than its words. The spacing between them, the shape ' +
     'of a quote, the kind of dash - these are choices a reader never notices, and they can be made ' +
     'on purpose. Replace this paragraph with any other, pick a secret, and the mark travels with ' +
-    'the text wherever it is copied.';
+    'the text wherever it is copied. A mark is only as good as the room the text gives it: a short ' +
+    'note holds one copy and little else, while a few paragraphs hold several, and it is the spare ' +
+    'copies that survive an edit. Nothing here changes what the words say - the only thing that ' +
+    'changes is which of several identical-looking characters was chosen at each opportunity, and ' +
+    'no reader has ever noticed one of those.';
 
   // Two stages, left to right: original + secret in, watermarked + recovered out.
   //
@@ -429,9 +436,9 @@
           ] },
           field('Recovered secret', { t: 'div', a: { id: 'recOut' } }),
           { t: 'p', a: { class: 'foot-note hint' },
-            c: bw.raw('Rewording in place survives — replace a word with one of the same shape and recover again. ' +
-              '<b>Adding or deleting words does not:</b> it shifts every carrier position after the edit. See ' +
-              '<a href="#/how">How it works</a>.') }
+            c: bw.raw('Edit the text above and recover again. Adding or deleting words shifts every carrier ' +
+              'position after the edit; the decoder resynchronises, but it needs spare capacity to fall back ' +
+              'on — a longer passage survives more. See <a href="#/how">How it works</a>.') }
         ] } })
       ] }
     });
@@ -549,6 +556,8 @@
               content: bw.raw('Between the ECC bit stream and the carrier glyphs sits one <b>mixed-radix symbol layer</b>. A carrier with <i>N</i> equivalent glyphs per site holds log<sub>2</sub><i>N</i> bits — often fractional (a 3-way choice is 1.585 bits, not 1). Rather than round down at every site and throw those fractions away, spab packs the bit stream into the sites by base conversion, in <b>bounded blocks</b> so a damaged symbol only affects its block (never the whole message). Every carrier — even the power-of-two ones — flows through the same layer.') },
             { title: 'Optional keyed scramble',
               content: bw.raw('Pass a <b>key</b> and the symbol stream is <b>whitened</b> (a key-derived pseudo-random value is added to each symbol, flattening the carrier statistics) and <b>interleaved</b> (a key-derived permutation spreads burst damage across blocks and hides the order). Right key decodes; wrong or missing key does not. This is <i>keyed</i> — cryptography, not a hidden constant — but it is a <b>cost multiplier, not confidentiality</b>: real secrecy will come from the planned authenticated cipher.') },
+            { title: 'Edits that add or remove text',
+              content: bw.raw('Inserting or deleting a word usually changes how many carrier sites the text has, and that shifts the whole symbol stream: blocks get cut one position off, so everything after the edit reads as noise. Redundancy alone cannot fix it, because every copy shifts together — measured across 1x, 2x, 4x and 11x redundancy, all failed identically. The decoder therefore <b>resynchronises</b>: it re-cuts the block grid at each phase, pooling RLNC packets from every phase and, for repetition, scanning for a single intact self-contained frame. On the research harness this took excerpting (cut/paste at 75% kept) from 2% to 17% recovery, and word deletion from 3% to 6%. Recovery still depends on spare capacity — a passage holding exactly one copy has nothing to fall back on.') },
             { title: 'Capacity vs. robustness',
               content: bw.raw('More redundancy = more survivable, less payload. A short passage holds a tiny serial ultra-redundantly; a long document holds a hash, JSON, or an easter-egg program. Match payload size to text length, then spend the rest on redundancy.') }
           ]

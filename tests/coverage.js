@@ -96,11 +96,46 @@ function isIgnored(b) {
   return /cov-ignore/.test(here) || /cov-ignore/.test(above);
 }
 
+// ---- per-offset execution across all processes ----
+//
+// A block's own count is not enough to decide it never ran. V8 emits COARSE ranges
+// in a process where a region was skipped and FINER nested ranges in a process
+// where parts of it executed, so the same code yields different [start,end) keys
+// per process and the two can never cancel by key. Merging on the key alone left
+// a coarse zero-range from one test file standing even though another test file
+// executed every statement inside it — reporting covered code as uncovered.
+//
+// So resolve execution per source offset instead. Within one profile, ranges nest
+// and the innermost wins, which is exactly what applying them in order gives;
+// summing those per-offset maps across processes yields "did any run execute this
+// byte". A block is uncovered only when no byte in its span ever ran.
+const execCount = new Int32Array(src.length);
+for (const f of files) {
+  let j; try { j = JSON.parse(fs.readFileSync(path.join(covDir, f), 'utf8')); } catch (e) { continue; }
+  const local = new Int32Array(src.length);
+  for (const entry of (j.result || [])) {
+    if (!entry.url || !entry.url.endsWith('src/js/spab.js')) continue;
+    for (const fn of entry.functions) {
+      for (const rg of fn.ranges) {
+        const end = Math.min(rg.endOffset, src.length);
+        for (let i = rg.startOffset; i < end; i++) local[i] = rg.count;   // nested ranges come later and override
+      }
+    }
+  }
+  for (let i = 0; i < src.length; i++) if (local[i] > 0) execCount[i] += local[i];
+}
+function ranAnywhere(b) {
+  const end = Math.min(b.e, src.length);
+  for (let i = b.s; i < end; i++) if (execCount[i] > 0) return true;
+  return b.s >= end && b.count > 0;   // zero-width range: fall back to its own count
+}
+
 // ---- compute block (branch) coverage ----
 // Only genuinely-uncovered blocks on cov-ignore lines are excluded; every COVERED
 // block still counts toward the total (keeps the denominator honest — a marker can
 // never inflate coverage by hiding a branch that actually ran).
 const allRaw = Array.from(blocks.values());
+allRaw.forEach(function (b) { if (b.count === 0 && ranAnywhere(b)) b.count = 1; });
 const ignored = allRaw.filter(function (b) { return isIgnored(b) && b.count === 0; });
 const all = allRaw.filter(function (b) { return !(isIgnored(b) && b.count === 0); });
 const branchTotal = all.length;
