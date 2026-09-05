@@ -311,6 +311,82 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
     'boundary: zero-width padding around a real gap still counts as a site');
 })();
 
+// -- the frame matches its own descriptor --
+//
+// The type field was specified in the original design and absent from the first
+// working commit onward, and nothing caught it: there was no test, and
+// `algorithm.frame` described the code rather than the spec. These assertions make
+// the descriptor the contract, so an implementation that stops matching it fails.
+(function () {
+  const f = SPAB.algorithm.frame;
+  ok(Array.isArray(f.fields) && f.fields.length === 6, 'frame descriptor lists 6 fields');
+  ok(f.fields[1].indexOf('ver') === 0, 'frame carries a version field');
+  ok(f.fields[2].indexOf('type') === 0, 'frame carries a type field');
+  ok(f.overheadBytes === 5, 'frame overhead is magic+ver+type+len+crc = 5 bytes');
+  ok(f.types && f.types.string !== undefined && f.types.json !== undefined &&
+     f.types.uuid !== undefined && f.types.encrypted !== undefined, 'type table names the specified types');
+  ok(f.reserved && f.reserved.version === 0xFF && f.reserved.type === 0xFF,
+    'a value is reserved in each field for future extension');
+
+  // And the implementation actually produces what the descriptor claims.
+  const cover = ('Every document carries more than its words. The spacing between them, the shape ' +
+    'of a quote, the kind of dash - these are choices a reader never notices. ').repeat(6);
+  const enc = SPAB.encode(cover, 'acme-42', {});
+  const dec = SPAB.decode(enc.text, {});
+  ok(dec.metadata.frameVersion === 'v' + f.version, 'decoded frame reports the descriptor version');
+  ok(dec.metadata.type === 'string', 'a plain identifier decodes as type "string"');
+  ok(enc.metadata.type === 'string', 'encode reports the type it wrote');
+
+  // Types are inferred where the caller does not say, and honoured where they do.
+  ok(SPAB.decode(SPAB.encode(cover, '{"a":1}', {}).text, {}).metadata.type === 'json',
+    'JSON payload is typed as json');
+  ok(SPAB.decode(SPAB.encode(cover, '3f2504e0-4f89-11d3-9a0c-0305e82c3301', {}).text, {}).metadata.type === 'uuid',
+    'a uuid payload is typed as uuid');
+  ok(SPAB.decode(SPAB.encode(cover, '{"a":1}', { type: 'string' }).text, {}).metadata.type === 'string',
+    'an explicit type overrides inference');
+  ok(SPAB.decode(SPAB.encode(cover, 'not json {', {}).text, {}).metadata.type === 'string',
+    'text that merely looks brace-ish is not typed as json');
+
+  // A type this version does not know about must be reported, not swallowed — that
+  // is what lets a newer writer and an older reader disagree safely.
+  for (const ecc of ['repetition', 'rlnc']) {
+    const long = cover + cover;
+    const unknown = SPAB.encode(long, 'acme-42', { type: 0x42, ecc: ecc });
+    const back = SPAB.decode(unknown.text, { ecc: ecc });
+    ok(back.message === 'acme-42', 'unknown type still yields the payload (' + ecc + ')');
+    ok(back.metadata.type === '0x42', 'unknown type is reported by code (' + ecc + '): ' + back.metadata.type);
+  }
+
+  // Same, but forced down the resync path: deleting a word shifts the stream, so
+  // the payload is recovered by scanning for an intact frame rather than folding.
+  // That path reads the type independently and must report it too.
+  const longer = cover + cover;
+  const damagedUnknown = SPAB.encode(longer, 'acme-42', { type: 0x42 }).text.replace(' spacing', '');
+  const rescued = SPAB.decode(damagedUnknown, {});
+  ok(rescued.message === 'acme-42', 'resync path recovers a payload with an unknown type');
+  ok(rescued.metadata.type === '0x42', 'resync path reports the unknown type: ' + rescued.metadata.type);
+
+  // Inference edges: brace-shaped but invalid JSON stays text; an array is json;
+  // and a byte array is carried as bytes rather than being stringified.
+  ok(SPAB.decode(SPAB.encode(cover, '{not valid json}', {}).text, {}).metadata.type === 'string',
+    'brace-shaped text that does not parse is typed string');
+  ok(SPAB.decode(SPAB.encode(cover, '[1,2,3]', {}).text, {}).metadata.type === 'json',
+    'a JSON array is typed json');
+
+  const raw = new Uint8Array([0x00, 0x01, 0xfe, 0xff, 0x41]);
+  const encBytes = SPAB.encode(cover, raw, {});
+  const decBytes = SPAB.decode(encBytes.text, {});
+  ok(decBytes.metadata.type === 'bytes', 'a byte array is typed bytes');
+  ok(decBytes.metadata.payloadBytes === raw.length, 'byte payload keeps its length');
+  ok(Array.from(decBytes.metadata.bytes).join(',') === Array.from(raw).join(','),
+    'byte payload round-trips exactly through metadata.bytes');
+
+  // A type name this build does not know falls back to string rather than throwing:
+  // a caller from a newer version should degrade, not crash.
+  ok(SPAB.decode(SPAB.encode(cover, 'acme-42', { type: 'no-such-type' }).text, {}).metadata.type === 'string',
+    'an unrecognised type name falls back to string');
+})();
+
 // -- auto-grow: payloads that do not fit the cover text --
 //
 // Substitution carriers are bounded by the text. When a payload cannot fit even

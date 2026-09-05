@@ -173,10 +173,40 @@ string. Compare `metadata.payloadBytes` against your message length if that matt
 Note the budget is in *bytes*, not characters, so accented text and emoji cost
 several bytes each.
 
-**There is no type field.** The decoder returns the bytes as written; it cannot tell
-an identifier from JSON from ciphertext, and neither can the CLI. Anything that
-depends on knowing — a typed payload, a compact binary JSON encoding, an encrypted
-flag — is tracked in [`dev/roadmap.md`](../../dev/roadmap.md).
+## Payload types
+
+The frame carries a **type** so the decoder can say what a payload is, not just hand
+back bytes:
+
+| type | meaning |
+|---|---|
+| `string` | UTF-8 text (the default) |
+| `json` | UTF-8 that parses as JSON |
+| `uuid` | a canonical UUID |
+| `bytes` | arbitrary bytes, returned as-is |
+| `program` | reserved for executable payloads |
+| `encrypted` | payload is ciphertext (see the roadmap — not yet produced by this version) |
+| `extended` | `0xFF`, reserved so the type space can grow |
+
+Type is inferred when you do not say — JSON that actually parses is typed `json`, a
+canonical UUID is typed `uuid`, everything else is `string` — and an explicit
+`params.type` always wins:
+
+```js
+SPAB.encode(text, '{"case":42}', {});                   // -> type "json"
+SPAB.encode(text, '{"case":42}', { type: 'string' });   // -> type "string"
+SPAB.decode(marked, {}).metadata.type;                  // -> "json"
+```
+
+`SPAB.TYPES` is the table; `metadata.type` and `metadata.frameVersion` come back on
+every decode.
+
+**Wire format.** The frame is `[magic][ver][type][len][content][crc8]` — 5 bytes of
+overhead. Marks written by **0.4.x used a different frame and do not decode here**:
+that release had no version or type byte, and accepting both layouts doubled the
+chance of a chance-CRC false frame (a UUID payload decoded as a "legacy string"
+during development), so the break is explicit rather than a guess. The version field
+exists to make the next change cheaper than this one.
 
 ## Reading a mark back
 

@@ -8,13 +8,21 @@ Status legend: **open** (not started), **partial** (some of it shipped), **done*
 
 ## Payload handling
 
-### Typed payloads — **open**
-The frame is `[magic][len][content][crc8]`; `content` is opaque UTF-8 bytes. There is
-no field saying what the payload *is*, so a decoder cannot tell an identifier from
-JSON from ciphertext, and the CLI can only say "UTF-8 text, as written". A one-byte
-type field would cover: raw text, JSON, binary (base64 in / bytes out), and
-"encrypted — see key material". Costs one byte of every payload and is a frame
-change, so it should land with any other frame work rather than on its own.
+### Typed payloads — **done** (frame v1, unreleased)
+The frame is now `[magic][ver][type][len][content][crc8]`. Type covers string / json
+/ uuid / bytes / program / encrypted, with `0xFF` reserved in both the version and
+type fields so the space can grow. Inferred when the caller does not say; explicit
+`params.type` wins.
+
+Two notes for whoever revisits this. The original design argued for **flag-coded**
+types (a bit, not a byte) precisely because header bytes are expensive on short
+passages — and the measured cost of the simpler layout is real: framing went from 3
+to 5 bytes, so a 7-byte secret's frame grew 10 -> 12 bytes, about 20% more capacity
+for the same payload. Moving to a varint later is exactly what the version field is
+for. And it went missing in the first place because nothing tested it: the
+`algorithm.frame` descriptor described the code rather than the spec, so the gap was
+invisible. The descriptor is now the contract and `tests/branches.test.js` asserts
+against it.
 
 ### Compact JSON encoding — **open**
 JSON payloads are stored as their literal text, which is the least efficient

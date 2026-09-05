@@ -27,7 +27,7 @@ function readStdin() {
 }
 
 function parse(argv) {
-  var f = {}, alias = { m: 'message', i: 'in', o: 'out', c: 'classes', h: 'help', j: 'json' };
+  var f = {}, alias = { m: 'message', i: 'in', o: 'out', c: 'classes', h: 'help', j: 'json', t: 'type' };
   for (var k = 0; k < argv.length; k++) {
     var a = argv[k];
     if (a[0] === '-') {
@@ -48,13 +48,17 @@ function input(f, label) {
   if (!process.stdin.isTTY) return readStdin();
   console.error('error: no ' + label + ' — use --in <file> or pipe via stdin'); process.exit(1);
 }
-function params(f) { return f.classes ? { classes: String(f.classes).split(',') } : {}; }
+function params(f) {
+  var p = f.classes ? { classes: String(f.classes).split(',') } : {};
+  if (f.type && f.type !== true) p.type = String(f.type);
+  return p;
+}
 
 function help() {
   console.log([
     'spab — hide/reveal a message in the whitespace and punctuation of text',
     '',
-    '  spab encode --message "<secret>" --in <file> [--out <file>] [--classes ws,apos,hyphen]',
+    '  spab encode --message "<secret>" --in <file> [--out <file>] [--classes ws,apos,hyphen] [--type json]',
     '  spab decode --in <file> [--classes ws,apos,hyphen] [--json]',
     '  spab capacity --in <file>',
     '  spab inspect --in <file>            full report as JSON',
@@ -79,6 +83,8 @@ function report(text, d) {
   if (m.reps !== undefined) bits.push(m.reps + ' copies');
   if (m.packets !== undefined) bits.push(m.packets + ' packets');
   if (m.payloadBytes !== undefined) bits.push(m.payloadBytes + ' bytes');
+  if (m.type) bits.push('type ' + m.type);
+  if (m.frameVersion) bits.push('frame ' + m.frameVersion);
   bits.push(m.crcOk ? 'crc ok' : 'crc FAILED');
   console.error('  ' + bits.join('  ·  '));
 
@@ -87,9 +93,15 @@ function report(text, d) {
   // There is no type or encryption field in the frame yet: the payload is opaque
   // UTF-8 bytes. Say so rather than let the absence read as "not encrypted".
   if (d.message !== null) {
-    var looksJson = /^[\s]*[[{]/.test(d.message);
-    console.error('  payload: UTF-8 text' + (looksJson ? ' (parses as JSON-shaped)' : '') +
-      ' — the frame carries no type or encryption field, so this is the raw payload as written');
+    var t = m.type || 'string';
+    if (t === 'encrypted') {
+      console.error('  payload: ENCRYPTED — decrypt with the key it was written under');
+    } else if (t === 'json') {
+      var parses = true; try { JSON.parse(d.message); } catch (e) { parses = false; }
+      console.error('  payload: JSON' + (parses ? '' : ' (typed json but does not parse — treat as text)'));
+    } else {
+      console.error('  payload: ' + t + ' (UTF-8 bytes as written)');
+    }
   }
 }
 
