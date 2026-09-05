@@ -38,6 +38,12 @@ editing and copying — not resisting someone who is trying to remove it.
 npm install @deftio/spab
 ```
 
+Payloads are opaque UTF-8 bytes up to **255 bytes**: identifiers, JSON, accented
+text, emoji, or base64 for binary. There is no type field yet — the decoder returns
+what was written and cannot say what it is. Planned work (typed payloads, compact
+binary JSON, authenticated encryption, payloads over 255 bytes) is tracked in
+[`dev/roadmap.md`](dev/roadmap.md).
+
 Try it on real text in the browser: **[deftio.github.io/spab](https://deftio.github.io/spab/pages/)**
 
 > Status: early, but published. The **JavaScript reference implementation** (`src/js`) is on npm as

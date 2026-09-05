@@ -153,6 +153,46 @@ defeat a determined stripper: anyone who knows the carrier set can remove the ma
 the text removes it entirely. The design raises that cost and makes stripping detectable; it never
 claims to be unbreakable.
 
+## What a payload can be
+
+The frame carries **opaque UTF-8 bytes**, so any string that survives a UTF-8 round
+trip and fits the budget is a valid payload:
+
+| shape | example | notes |
+|---|---|---|
+| identifier | `invoice-4417` | the common case |
+| JSON | `{"r":"j.smith","case":42}` | stored as literal text — see the note below |
+| Unicode / accents | `зака́з-42 — naïve café` | multi-byte characters cost more of the budget |
+| emoji | `case ✅ 42` | fine, but each emoji is 3–4 bytes |
+| base64 | `aGVsbG8gd29ybGQ=` | how to carry binary today |
+| text with spaces | `two words here` | no restriction on content |
+
+**255 bytes is the hard limit** — the frame's length field is one byte. A longer
+message is silently truncated: it encodes cleanly and decodes to a *different*
+string. Compare `metadata.payloadBytes` against your message length if that matters.
+Note the budget is in *bytes*, not characters, so accented text and emoji cost
+several bytes each.
+
+**There is no type field.** The decoder returns the bytes as written; it cannot tell
+an identifier from JSON from ciphertext, and neither can the CLI. Anything that
+depends on knowing — a typed payload, a compact binary JSON encoding, an encrypted
+flag — is tracked in [`dev/roadmap.md`](../../dev/roadmap.md).
+
+## Reading a mark back
+
+`spab decode` prints the payload on stdout and a report on stderr, so piping stays
+clean:
+
+```
+$ spab decode --in marked.txt
+acme-42
+  status perfect  ·  confidence 100%  ·  via ws  ·  ecc repetition  ·  8 copies  ·  7 bytes  ·  crc ok
+  payload: UTF-8 text — the frame carries no type or encryption field
+```
+
+`spab decode --json` emits the full metadata, and `spab inspect` reports capacity,
+carrier sites, zero-width count and the decode result together as JSON.
+
 ## API
 
 `encode(text, message, params)` → `{ text, metadata }`
