@@ -45,11 +45,31 @@ ok(encEmpty.metadata.slots === 0 && encEmpty.metadata.capacityBits === 0, 'no re
 ok(encEmpty.text === 'hello world here', 'no classes -> text unchanged');
 
 // -- the varint length removed the 255-byte ceiling --
+// payloadBytes is the STORED size (post-compression); messageBytes is the payload
+// the caller handed over. A run of 400 'z' is exactly the case compression is for,
+// so the two differ here and that difference is the point.
 const big = 'z'.repeat(400);
 const longCover = ('word ').repeat(2000);
 const encBig = SPAB.encode(longCover, big, { classes: ['ws'] });
-ok(encBig.metadata.payloadBytes === 400, 'a 400-byte payload is carried whole, not truncated at 255');
-ok(SPAB.decode(encBig.text, { classes: ['ws'] }).message === big, 'a 400-byte payload round-trips');
+ok(encBig.metadata.messageBytes === 400, 'a 400-byte payload is carried whole, not truncated at 255');
+ok(encBig.metadata.payloadBytes < 400 && encBig.metadata.compression === 'lzss',
+  'a run-length payload is compressed, and the stored size says so');
+ok(SPAB.decode(longCover.length ? encBig.text : '', { classes: ['ws'] }).message === big,
+  'a 400-byte payload round-trips');
+// Same length, incompressible: stored size equals the original and comp stays none.
+// A cyclic pattern is NOT incompressible — LZSS has a 4 KB window and would find
+// the period. This needs a stream with no repeats to test the other branch.
+let rngState = 0x9e3779b9;
+const bigRandom = Array.from({ length: 400 }, () => {
+  rngState ^= rngState << 13; rngState >>>= 0;
+  rngState ^= rngState >>> 17; rngState ^= rngState << 5; rngState >>>= 0;
+  return String.fromCharCode(33 + (rngState % 90));
+}).join('');
+const encRandom = SPAB.encode(longCover, bigRandom, { classes: ['ws'] });
+ok(encRandom.metadata.payloadBytes === 400 && encRandom.metadata.compression === 'none',
+  'an incompressible 400-byte payload is stored as-is');
+ok(SPAB.decode(encRandom.text, { classes: ['ws'] }).message === bigRandom,
+  'an incompressible 400-byte payload round-trips');
 
 // -- too-short passage: single truncated copy + issue message --
 const encShort = SPAB.encode('a b', 'this-will-not-fit-in-two-sites', { classes: ['ws'] });
@@ -320,16 +340,25 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
 // the descriptor the contract, so an implementation that stops matching it fails.
 (function () {
   const f = SPAB.algorithm.frame;
-  ok(Array.isArray(f.fields) && f.fields.length === 5, 'frame descriptor lists its fields');
-  ok(f.fields[1].indexOf('ver') === 0 && f.fields[1].indexOf('type') > 0,
-    'version and type share one byte');
-  ok(f.fields[2].indexOf('varint') > 0, 'length is a varint and optional');
-  ok(f.overheadBytes.fixedType === 3 && f.overheadBytes.variableType === 4,
-    'overhead is 3 bytes for fixed types, 4 for variable');
+  ok(f.version === 2, 'the descriptor names wire format v2');
+  ok(Array.isArray(f.fields) && f.fields.length === 10, 'frame descriptor lists its fields');
+  ok(f.fixedHeaderBits === 17, 'the fixed header is 17 bits');
+  ok(f.fields[0] === 'version:3' && f.fields[1] === 'type:5' && f.fields[2] === 'comp:3' &&
+     f.fields[3] === 'enc:3' && f.fields[4] === 'cksum:3',
+    'the fixed header is version, type, comp, enc, cksum — in pipeline order');
+  ok(f.checksumPosition === 'before content', 'the checksum precedes the content');
+  ok(f.checksumCovers.indexOf('header') === 0, 'the checksum covers the header as well as the content');
+  ok(f.sync.indexOf('checksum') > 0 && f.sync.indexOf('magic') < 0,
+    'there is no magic number — the header plus the checksum is the discriminator');
   ok(f.types && f.types.string !== undefined && f.types.json !== undefined &&
      f.types.uuid !== undefined && f.types.encrypted !== undefined, 'type table names the specified types');
-  ok(f.reserved && f.reserved.version === 7 && f.reserved.type === 31,
-    'the top value of each field is reserved for extension');
+  ok(f.compression && f.compression.none === 0 && f.compression.lzss === 1, 'compression codes are declared');
+  ok(f.encryption && f.encryption.none === 0 && f.encryption.aes256gcm === 1, 'encryption codes are declared');
+  ok(f.escapes.version === 7 && f.escapes.type === 31 && f.escapes.comp === 7 &&
+     f.escapes.enc === 7 && f.escapes.cksum === 7,
+    'the top value of every enumerated field is reserved for extension');
+  ok(f.checksumExponents[0] === 8 && f.checksumExponents[1] === 16 && f.checksumExponents[5] === 256,
+    'the checksum field is an exponent: bits = 8 << n');
   ok(f.fixedSizes[f.types.uuid] === 16 && f.fixedSizes[f.types.sha256] === 32 &&
      f.fixedSizes[f.types.ser8] === 8, 'fixed types declare their sizes');
 
@@ -400,6 +429,7 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
     const d = SPAB.decode(e.text, {});
     ok(d.metadata.type === name, name + ' is inferred from the payload shape');
     ok(d.metadata.payloadBytes === size, name + ' is carried in ' + size + ' bytes');
+    ok(d.metadata.compression === 'none', name + ' is not worth compressing, so it is stored plain');
     ok(d.message === payload, name + ' round-trips to its canonical form');
   }
   // A payload that claims a fixed type but is the wrong size must not be written as

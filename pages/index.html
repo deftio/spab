@@ -77,7 +77,13 @@
   }
   function withKey(p) { if (st.key) p.key = st.key; return p; }
   function applyAttacks(text) { Object.keys(A).forEach(function (k) { if (st.active[k]) text = A[k].fn(text, A[k].p); }); return text; }
-  function statusVariant(s) { return s === 'perfect' ? 'bw_success' : s === 'corrected' ? 'bw_warning' : 'bw_danger'; }
+  // 'encrypted' means the packet was found and verified but needs a key — that is a
+  // successful read, not a failure, so it should not turn the badge red.
+  function statusVariant(s) {
+    if (s === 'perfect') return 'bw_success';
+    if (s === 'corrected' || s === 'encrypted') return 'bw_warning';
+    return 'bw_danger';
+  }
   // Detectability proxy (learned from StegCloak's "the Warden can count invisibles" +
   // Agarwal's cover/stego similarity): how much the marked text deviates from natural.
   function detectability(text) {
@@ -113,7 +119,11 @@
   // compact summary badges (always visible)
   function updateMeta(md) {
     var items = [badge('method ' + st.method), badge('ecc ' + md.ecc), badge('carriers ' + (md.classes || []).join('+')),
-      badge((md.ecc === 'rlnc' ? 'packets ' : 'copies ') + md.reps), badge('payload ' + md.payloadBytes + 'B')];
+      badge((md.ecc === 'rlnc' ? 'packets ' : 'copies ') + md.reps),
+      badge('type ' + md.type), badge('payload ' + md.messageBytes + 'B')];
+    // Only worth a badge when it actually happened — a badge saying "none" is noise.
+    if (md.compression && md.compression !== 'none') items.push(badge(md.compression + ' ' + md.messageBytes + '\u2192' + md.payloadBytes + 'B'));
+    if (md.encrypted) items.push(badge(md.encryption));
     if (md.issues && md.issues.length) items.push(badge(md.issues.join(' '), 'bw_warning'));
     bw.DOM('#encMeta', { t: 'div', a: { class: 'metawrap' }, c: items });
   }
@@ -135,7 +145,16 @@
       statRow('scramble key', st.key ? 'set — keyed interleave + whitening' : 'none'),
       statRow('cover chars', String(coverN)),
       statRow('watermarked chars', wmN + (added ? '  (Δ ' + (added > 0 ? '+' : '') + added + ')' : '  (unchanged length)') + (edited ? '  · edited' : '')),
-      statRow('payload', md.payloadBytes + ' B  (frame ' + md.frameBytes + ' B = ' + frameBits + ' bits)'),
+      statRow('payload type', md.type + (md.typeCode !== undefined ? '  (code ' + md.typeCode + ')' : '')),
+      statRow('payload', md.messageBytes + ' B given' +
+        (md.payloadBytes !== md.messageBytes ? ', ' + md.payloadBytes + ' B stored' : '') +
+        '  (packet ' + md.frameBytes + ' B = ' + frameBits + ' bits)'),
+      statRow('compression', md.compression + (md.compression !== 'none' && md.messageBytes
+        ? '  (' + Math.round(100 - 100 * md.payloadBytes / md.messageBytes) + '% smaller)' : '')),
+      statRow('encryption', md.encryption),
+      statRow('checksum', md.checksum + '  (' + md.checksumBits + ' bits)'),
+      statRow('packet header', md.headerBits + ' bits' + (md.padBits ? ' + ' + md.padBits + ' pad' : '') +
+        '  (wire v' + md.wireVersion + ')'),
       statRow('capacity (strongest)', cap + ' bits'),
       statRow('carrier bits / cover char', String(bpc)),
       statRow(md.ecc === 'rlnc' ? 'packets emitted' : 'copies', String(md.reps)),
@@ -396,7 +415,7 @@
     if (back.message === tr.secret) {
       tr.kind = 'success';
       var grew = res.text.length - tr.cover.length;
-      tr.note = '<b>Hidden.</b> ' + md.payloadBytes + ' bytes carried ' + md.reps +
+      tr.note = '<b>Hidden.</b> ' + md.messageBytes + ' bytes carried ' + md.reps +
         '\u00d7 over ' + md.slots + ' sites.' +
         (grew > 0 ? ' The secret was larger than this passage could hold, so <b>' + grew +
           ' invisible characters</b> were added — the words are unchanged, but the text is now ' +

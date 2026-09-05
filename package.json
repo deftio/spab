@@ -1,29 +1,31 @@
 {
   "name": "spab-workspace",
   "private": true,
-  "version": "0.4.2",
-  "description": "spab \u2014 watermark plain text. Monorepo root (reference JS lib in src/js, research in r_and_d).",
+  "version": "0.5.0",
+  "description": "spab — watermark plain text. Monorepo root (reference JS lib in src/js, research in r_and_d).",
   "license": "BSD-2-Clause",
   "author": "M. A. Chatterjee (deftio)",
   "dependencies": {},
   "devDependencies": {},
   "scripts": {
     "lint": "node tests/lint.js",
-    "test": "node tests/roundtrip.test.js && node tests/branches.test.js && node tests/noise.test.js",
+    "test": "node tests/roundtrip.test.js && node tests/branches.test.js && node tests/wire.test.js && node tests/noise.test.js",
     "fuzz": "node tests/fuzz.test.js",
     "coverage": "node tests/coverage.js",
     "coverage:strict": "node tests/coverage.js --strict",
     "bench": "node r_and_d/harness.js --gen 2000",
     "survival": "node r_and_d/symbol-survival.js --gen 3000",
     "basen": "node r_and_d/basen.js",
-    "ci": "node tests/lint.js && node tests/roundtrip.test.js && node tests/branches.test.js && node tests/noise.test.js && node r_and_d/harness.js --gen 500 --no-log && node r_and_d/symbol-survival.js --gen 500",
+    "ci": "node tests/lint.js && node tools/wire-tables.js --check && node tests/roundtrip.test.js && node tests/branches.test.js && node tests/wire.test.js && node tests/noise.test.js && node r_and_d/harness.js --gen 500 --no-log && node r_and_d/symbol-survival.js --gen 500",
     "gui": "npx --yes --package bitwrench@2 bwcli serve . --port 1948",
     "dev": "npx --yes --package bitwrench@2 bwcli serve . --port 1948",
     "whoami": "node tools/gh-identity.js",
     "start-release": "node tools/start-release.js",
     "release": "node tools/release.js",
     "release:dry": "node tools/release.js --dry-run",
-    "noise": "node tests/noise.test.js"
+    "noise": "node tests/noise.test.js",
+    "wire": "node tests/wire.test.js",
+    "wire:tables": "node tools/wire-tables.js"
   },
-  "//port": "1948 \u2014 the year Claude Shannon published 'A Mathematical Theory of Communication' (spab's entropy north star). Chosen to avoid the crowded 3000/8000/8080."
+  "//port": "1948 — the year Claude Shannon published 'A Mathematical Theory of Communication' (spab's entropy north star). Chosen to avoid the crowded 3000/8000/8080."
 }

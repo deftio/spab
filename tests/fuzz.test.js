@@ -30,6 +30,12 @@ const WORDS = ('the of and to in is it you that he was for on are with as his th
   'don\'t can\'t it\'s well-known state-of-the-art mother-in-law user\'s time-out follow-up').split(' ');
 const CLASS_SETS = [undefined, ['ws'], ['ws', 'punct'], ['apos'], ['hyphen'], ['ws', 'apos', 'hyphen'], ['punct'], ['wsdense'], ['zwsp']];
 const ECCS = ['repetition', 'rlnc'];
+// Two fixed 32-byte keys, so an encrypted round trip uses the same key both ways and
+// any failure stays reproducible from the seed alone.
+const FUZZ_KEYS = [
+  '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+  'f0e1d2c3b4a596870f1e2d3c4b5a69780f1e2d3c4b5a69780f1e2d3c4b5a6978'
+];
 const MSG_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.: /#@'.split('')
   .concat(['é', 'ü', 'ñ', '—', '…', '你', '好', '🙂', '\'', '"']);
 
@@ -84,6 +90,12 @@ for (let i = 0; i < ITERS; i++) {
   if (r() < 0.15) params.block = randInt(r, 3, 20);           // exercise the block-size knob
   if (r() < 0.25) params.autoGrow = true;                     // exercise growing to fit an oversized payload
   if (params.autoGrow && r() < 0.5) params.redundancy = randInt(r, 1, 5);
+  // Wire-format v2 knobs. encKey and cksum change the packet's size and shape, so
+  // they interact with capacity, auto-grow and the block grid — which is exactly the
+  // interaction a permutation fuzzer is for.
+  if (r() < 0.2) params.encKey = FUZZ_KEYS[randInt(r, 0, FUZZ_KEYS.length - 1)];
+  if (r() < 0.2) params.cksum = randInt(r, 0, 5);
+  if (r() < 0.15) params.compress = false;
 
   // --- invariant 1: round-trip when capacity allows ---
   let enc;

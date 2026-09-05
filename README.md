@@ -20,7 +20,7 @@ punctuation one, and a smart-quote autocorrect does the reverse.
 Editing the words is the harder case. Inserting or deleting one usually changes the number of
 carrier sites, shifting the whole symbol stream so that everything after the edit reads as noise —
 and redundancy alone cannot help, because every copy shifts with it. The decoder resynchronises
-instead: it re-cuts the symbol blocks at each phase and looks for intact frames wherever they
+instead: it re-cuts the symbol blocks at each phase and looks for intact packets wherever they
 landed. Whether that recovers the payload depends on having spare capacity to fall back on
 (`metadata.reps` reports how many copies fit), so robustness is bought with text length, not
 wished for.
@@ -38,10 +38,14 @@ editing and copying — not resisting someone who is trying to remove it.
 npm install @deftio/spab
 ```
 
-Payloads are opaque UTF-8 bytes up to **255 bytes**: identifiers, JSON, accented
-text, emoji, or base64 for binary. There is no type field yet — the decoder returns
-what was written and cannot say what it is. Planned work (typed payloads, compact
-binary JSON, authenticated encryption, payloads over 255 bytes) is tracked in
+Payloads are **typed**: identifiers, JSON, UUIDs, digests, or arbitrary bytes. The
+packet header says what the payload is, whether it was compressed, whether it was
+encrypted, and how wide its checksum is, so a decoder reports what it found instead
+of handing back anonymous bytes. Length is a varint, so there is no 255-byte ceiling.
+Payloads can be compressed (kept only when it helps) and encrypted with AES-256-GCM.
+
+The packet format is specified in [`dev/wire-format.md`](dev/wire-format.md); the
+rest of the planned work (compact binary JSON, ChaCha20-Poly1305) is tracked in
 [`dev/roadmap.md`](dev/roadmap.md).
 
 Try it on real text in the browser: **[deftio.github.io/spab](https://deftio.github.io/spab/pages/)**
