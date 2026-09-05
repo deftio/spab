@@ -12,15 +12,30 @@ name: Publish
 #
 # PyPI is still token-gated and inert until PYPI_TOKEN exists and the port is real.
 
+# Trigger note: `release: published` alone does NOT work here. release-on-bump.yml
+# creates the Release with the default GITHUB_TOKEN, and GitHub deliberately does
+# not fire workflows from events raised by that token (loop prevention) — so this
+# workflow never ran for v0.4.0 through v0.4.2. Watching the release workflow
+# finish instead is what actually fires. The `release` trigger is kept for Releases
+# a human creates by hand, and workflow_dispatch for re-runs.
 on:
   release:
     types: [published]
-  workflow_dispatch: {}   # allow manual dry-runs from the Actions tab
+  workflow_run:
+    workflows: ["Release on version bump"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
 
 jobs:
   npm:
     name: npm (@deftio/spab)
     runs-on: ubuntu-latest
+    # Only publish when the release actually succeeded; a failed release run must
+    # not push a package.
+    if: >
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
       id-token: write        # the OIDC token IS the credential — no secret needed

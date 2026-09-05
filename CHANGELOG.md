@@ -7,6 +7,13 @@ the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
 
+### Fixed
+- **`publish.yml` never ran.** It triggered on `release: published`, but `release-on-bump.yml`
+  creates the Release with the default `GITHUB_TOKEN`, and GitHub does not fire workflows from
+  events raised by that token — so no release from v0.4.0 to v0.4.2 ever reached npm automatically.
+  It now also triggers on the release workflow completing, guarded so a failed release cannot
+  publish.
+
 ## [0.4.2] — 2026-09-04
 
 ### Added

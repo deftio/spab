@@ -15,7 +15,10 @@ You control the version number — the workflow never invents one. The workflows
   re-verifies tag == version + tests, then creates the Release. Use it to release from a specific
   commit. (The two never collide: bump-releases tag via the Actions token, which by design does not
   re-trigger the tag workflow.)
-- **`.github/workflows/publish.yml`** — runs when a Release is published. **npm needs no secret:**
+- **`.github/workflows/publish.yml`** — runs after `release-on-bump.yml` finishes (and on a
+  hand-made Release, or manual dispatch). It cannot trigger on `release: published` alone:
+  release-on-bump creates the Release with the default `GITHUB_TOKEN`, and GitHub does not fire
+  workflows from events raised by that token, so that trigger never fires for automated releases. **npm needs no secret:**
   it uses OIDC trusted publishing, so GitHub mints a short-lived identity token for the workflow and
   npm verifies it against the trusted publisher registered on the package (repo `deftio/spab`,
   workflow `publish.yml`). Uploads carry a provenance attestation tying the tarball to the commit and
