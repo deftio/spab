@@ -44,11 +44,12 @@ const encEmpty = SPAB.encode('hello world here', 'y', { classes: ['bogus'] });
 ok(encEmpty.metadata.slots === 0 && encEmpty.metadata.capacityBits === 0, 'no resolvable classes -> zero capacity');
 ok(encEmpty.text === 'hello world here', 'no classes -> text unchanged');
 
-// -- message longer than 255 bytes is truncated in buildFrame --
+// -- the varint length removed the 255-byte ceiling --
 const big = 'z'.repeat(400);
 const longCover = ('word ').repeat(2000);
 const encBig = SPAB.encode(longCover, big, { classes: ['ws'] });
-ok(encBig.metadata.payloadBytes === 255, 'message >255 bytes truncated to 255');
+ok(encBig.metadata.payloadBytes === 400, 'a 400-byte payload is carried whole, not truncated at 255');
+ok(SPAB.decode(encBig.text, { classes: ['ws'] }).message === big, 'a 400-byte payload round-trips');
 
 // -- too-short passage: single truncated copy + issue message --
 const encShort = SPAB.encode('a b', 'this-will-not-fit-in-two-sites', { classes: ['ws'] });
@@ -319,14 +320,18 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
 // the descriptor the contract, so an implementation that stops matching it fails.
 (function () {
   const f = SPAB.algorithm.frame;
-  ok(Array.isArray(f.fields) && f.fields.length === 6, 'frame descriptor lists 6 fields');
-  ok(f.fields[1].indexOf('ver') === 0, 'frame carries a version field');
-  ok(f.fields[2].indexOf('type') === 0, 'frame carries a type field');
-  ok(f.overheadBytes === 5, 'frame overhead is magic+ver+type+len+crc = 5 bytes');
+  ok(Array.isArray(f.fields) && f.fields.length === 5, 'frame descriptor lists its fields');
+  ok(f.fields[1].indexOf('ver') === 0 && f.fields[1].indexOf('type') > 0,
+    'version and type share one byte');
+  ok(f.fields[2].indexOf('varint') > 0, 'length is a varint and optional');
+  ok(f.overheadBytes.fixedType === 3 && f.overheadBytes.variableType === 4,
+    'overhead is 3 bytes for fixed types, 4 for variable');
   ok(f.types && f.types.string !== undefined && f.types.json !== undefined &&
      f.types.uuid !== undefined && f.types.encrypted !== undefined, 'type table names the specified types');
-  ok(f.reserved && f.reserved.version === 0xFF && f.reserved.type === 0xFF,
-    'a value is reserved in each field for future extension');
+  ok(f.reserved && f.reserved.version === 7 && f.reserved.type === 31,
+    'the top value of each field is reserved for extension');
+  ok(f.fixedSizes[f.types.uuid] === 16 && f.fixedSizes[f.types.sha256] === 32 &&
+     f.fixedSizes[f.types.ser8] === 8, 'fixed types declare their sizes');
 
   // And the implementation actually produces what the descriptor claims.
   const cover = ('Every document carries more than its words. The spacing between them, the shape ' +
@@ -351,20 +356,20 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
   // is what lets a newer writer and an older reader disagree safely.
   for (const ecc of ['repetition', 'rlnc']) {
     const long = cover + cover;
-    const unknown = SPAB.encode(long, 'acme-42', { type: 0x42, ecc: ecc });
+    const unknown = SPAB.encode(long, 'acme-42', { type: 26, ecc: ecc });   // unassigned in 5 bits
     const back = SPAB.decode(unknown.text, { ecc: ecc });
     ok(back.message === 'acme-42', 'unknown type still yields the payload (' + ecc + ')');
-    ok(back.metadata.type === '0x42', 'unknown type is reported by code (' + ecc + '): ' + back.metadata.type);
+    ok(back.metadata.type === '0x1a', 'unknown type is reported by code (' + ecc + '): ' + back.metadata.type);
   }
 
   // Same, but forced down the resync path: deleting a word shifts the stream, so
   // the payload is recovered by scanning for an intact frame rather than folding.
   // That path reads the type independently and must report it too.
   const longer = cover + cover;
-  const damagedUnknown = SPAB.encode(longer, 'acme-42', { type: 0x42 }).text.replace(' spacing', '');
+  const damagedUnknown = SPAB.encode(longer, 'acme-42', { type: 26 }).text.replace(' spacing', '');
   const rescued = SPAB.decode(damagedUnknown, {});
   ok(rescued.message === 'acme-42', 'resync path recovers a payload with an unknown type');
-  ok(rescued.metadata.type === '0x42', 'resync path reports the unknown type: ' + rescued.metadata.type);
+  ok(rescued.metadata.type === '0x1a', 'resync path reports the unknown type: ' + rescued.metadata.type);
 
   // Inference edges: brace-shaped but invalid JSON stays text; an array is json;
   // and a byte array is carried as bytes rather than being stringified.
@@ -380,6 +385,27 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
   ok(decBytes.metadata.payloadBytes === raw.length, 'byte payload keeps its length');
   ok(Array.from(decBytes.metadata.bytes).join(',') === Array.from(raw).join(','),
     'byte payload round-trips exactly through metadata.bytes');
+
+  // Fixed-size types carry no length byte and compact their payload: a uuid travels
+  // as 16 raw bytes rather than 36 characters, a sha256 as 32 rather than 64, and an
+  // 8-byte tag as itself. That is what pays for the header on the payloads people
+  // actually carry.
+  const FIXED = [
+    ['ser8', 'SPAB-001', 8],
+    ['uuid', '3f2504e0-4f89-11d3-9a0c-0305e82c3301', 16],
+    ['sha256', '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', 32]
+  ];
+  for (const [name, payload, size] of FIXED) {
+    const e = SPAB.encode(cover, payload, {});
+    const d = SPAB.decode(e.text, {});
+    ok(d.metadata.type === name, name + ' is inferred from the payload shape');
+    ok(d.metadata.payloadBytes === size, name + ' is carried in ' + size + ' bytes');
+    ok(d.message === payload, name + ' round-trips to its canonical form');
+  }
+  // A payload that claims a fixed type but is the wrong size must not be written as
+  // one — the frame would be lying about its own length.
+  ok(SPAB.decode(SPAB.encode(cover, 'too short', { type: 'uuid' }).text, {}).metadata.type === 'string',
+    'a mis-sized payload falls back off its fixed type');
 
   // A type name this build does not know falls back to string rather than throwing:
   // a caller from a newer version should degrade, not crash.
@@ -460,6 +486,20 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
     });
     return out;
   }
+  // A varint with continuation bits running on forever. Both the length reader and
+  // the stride probe that folding uses must reject it rather than accumulate a
+  // nonsense length.
+  const runawayVarint = textForBytes([[0xA5, 0x20, 0x80, 0x80], [0x80, 0x80, 0x80, 0x80], [0x80, 0x80, 0x80, 0x00]]);
+  const rv = SPAB.decode(runawayVarint, { classes: ['ws'], ecc: 'repetition' });
+  ok(rv.message === null, 'a length varint that never ends is rejected');
+
+  // A frame header whose varint length never terminates: every byte has the
+  // continuation bit set and the stream ends. The reader must give up rather than
+  // run past the end.
+  const truncatedVarint = textForBytes([[0x00, 0x11, 0x22, 0x33], [0xA5, 0x20, 0x80, 0x80]]);
+  const tv = SPAB.decode(truncatedVarint, { classes: ['ws'], ecc: 'repetition' });
+  ok(tv.message === null, 'a frame whose length varint never terminates is rejected');
+
   // block 1: MAGIC then len 0        -> rejected on length
   // block 2: MAGIC, len 2, bad CRC   -> rejected on CRC
   // block 3: filler so block 2 clears the bounds check and reaches the CRC test

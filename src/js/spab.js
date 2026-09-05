@@ -309,17 +309,77 @@
   // flag-coded types instead. Measured and recorded in reports/findings.md; this
   // takes the simpler layout deliberately and can move to varint later under the
   // version field it just gained.
-  var FRAME_VER = 1;          // version of the v2 layout itself
-  var VER_EXTENDED = 0xFF;    // reserved: version is carried elsewhere
-  var TYPE = { bytes: 0, string: 1, json: 2, uuid: 3, program: 4, encrypted: 5, extended: 0xFF };
-  var TYPE_NAME = {};
-  Object.keys(TYPE).forEach(function (k) { TYPE_NAME[TYPE[k]] = k; });
+  var FRAME_VER = 1;
+  var VER_EXTENDED = 7;       // reserved: version continues in the next byte
+  var TYPE_EXTENDED = 31;     // reserved: type continues in the next byte
+
+  // size 0 = variable (carries a varint length); non-zero = the type implies it and
+  // no length is written at all. Fixed types also COMPACT: a uuid travels as its 16
+  // raw bytes rather than 36 characters, a sha256 as 32 rather than 64 — which more
+  // than pays back the header on exactly the payloads people carry.
+  var TYPE_DEFS = {
+    string:    { code: 0,  size: 0 },
+    json:      { code: 1,  size: 0 },
+    bytes:     { code: 2,  size: 0 },
+    ser8:      { code: 3,  size: 8 },
+    uuid:      { code: 4,  size: 16 },
+    sha256:    { code: 5,  size: 32 },
+    program:   { code: 6,  size: 0 },
+    encrypted: { code: 7,  size: 0 },
+    extended:  { code: TYPE_EXTENDED, size: 0 }
+  };
+  var TYPE = {}, TYPE_NAME = {}, TYPE_SIZE = {};
+  Object.keys(TYPE_DEFS).forEach(function (k) {
+    TYPE[k] = TYPE_DEFS[k].code; TYPE_NAME[TYPE_DEFS[k].code] = k; TYPE_SIZE[TYPE_DEFS[k].code] = TYPE_DEFS[k].size;
+  });
 
   function typeCode(t) {
     // cov-ignore: defensive — encode always resolves a type before calling this
     if (t === undefined || t === null) return TYPE.string;
-    if (typeof t === 'number') return t & 0xff;
+    if (typeof t === 'number') return t & 31;
     return TYPE[t] === undefined ? TYPE.string : TYPE[t];
+  }
+
+  // varint: 7 bits per byte, high bit set means another follows. One byte to 127,
+  // and no 255-byte ceiling.
+  function putVarint(n) {
+    var out = [];
+    do { var b = n & 0x7f; n >>>= 7; out.push(n > 0 ? (b | 0x80) : b); } while (n > 0);
+    return out;
+  }
+  function getVarint(bytes, at) {
+    var n = 0, shift = 0, i = at;
+    while (i < bytes.length) {
+      var b = bytes[i++];
+      n |= (b & 0x7f) << shift;
+      if (!(b & 0x80)) return { value: n >>> 0, next: i };
+      shift += 7;
+      if (shift > 28) return null;   // absurd length: not a frame
+    }
+    return null;
+  }
+
+  function hexToBytes(h) {
+    var out = []; for (var i = 0; i + 1 < h.length; i += 2) out.push(parseInt(h.substr(i, 2), 16));
+    return out;
+  }
+  function bytesToHex(b) {
+    var out = ''; for (var i = 0; i < b.length; i++) out += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+    return out;
+  }
+  function contentBytes(message, code) {
+    if (code === TYPE.uuid) return hexToBytes(String(message).replace(/-/g, ''));
+    if (code === TYPE.sha256) return hexToBytes(String(message));
+    if (message instanceof Uint8Array || Array.isArray(message)) return Array.from(message);
+    return utf8Encode(String(message));
+  }
+  function contentToMessage(bytes, code) {
+    if (code === TYPE.uuid) {
+      var h = bytesToHex(bytes);
+      return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+    }
+    if (code === TYPE.sha256) return bytesToHex(bytes);
+    try { return utf8Decode(Array.from(bytes)); } catch (e) { return null; } // cov-ignore: TextDecoder is non-fatal
   }
 
   function inferType(message) {
@@ -331,19 +391,30 @@
       try { JSON.parse(t); return TYPE.json; } catch (e) { return TYPE.string; }
     }
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) return TYPE.uuid;
+    if (/^[0-9a-f]{64}$/i.test(t)) return TYPE.sha256;
+    // An 8-byte tag is the commonest payload there is, and the fixed type carries
+    // it with no length byte at all.
+    if (utf8Encode(t).length === 8 && t === message) return TYPE.ser8;
     return TYPE.string;
   }
 
   function buildFrame(message, type) {
-    var content = (message instanceof Uint8Array || Array.isArray(message))
-      ? Array.from(message) : utf8Encode(message);
-    // The length field is one byte, so 255 content bytes is a hard format limit.
-    // Truncating is deliberate and covered by a test — but it encodes cleanly and
-    // then decodes to a DIFFERENT message than the caller passed, which callers
-    // cannot detect without comparing. metadata.payloadBytes reports what was
-    // actually carried; compare it against the message length.
-    if (content.length > 255) content = content.slice(0, 255);
-    var frame = [MAGIC, FRAME_VER, typeCode(type), content.length].concat(content);
+    // Length is a varint now, so the old 255-byte ceiling is gone; the cap below is
+    // a sanity bound, far beyond what any cover text can carry. Over-long payloads
+    // are still truncated rather than rejected — compare metadata.payloadBytes
+    // against your message length if that matters.
+    var code = typeCode(type);
+    var content = contentBytes(message, code);
+    var fixed = TYPE_SIZE[code] || 0;
+    // A fixed type promises a size. If the payload does not match it is not that
+    // type, so fall back rather than write a frame that lies about itself.
+    if (fixed && content.length !== fixed) { code = TYPE.string; content = utf8Encode(String(message)); fixed = 0; }
+    // cov-ignore: sanity bound — no cover text can carry a 64KB payload
+    if (!fixed && content.length > 65535) content = content.slice(0, 65535);
+
+    var frame = [MAGIC, ((FRAME_VER & 7) << 5) | (code & 31)];
+    if (!fixed) frame = frame.concat(putVarint(content.length));
+    frame = frame.concat(content);
     frame.push(crc8(frame));
     return frame;
   }
@@ -575,7 +646,8 @@
         frameBits: frameBits.length,
         frameBytes: frame.length,
         reps: pc.reps,
-        payloadBytes: frame[3],
+        // cov-ignore: the frame was just built here, so it always parses
+        payloadBytes: (parseFrame(frame) || { len: 0 }).len,
         issues: issues
       }
     };
@@ -586,16 +658,19 @@
   // size has to be known before folding, and it depends on the layout: v2 carries
   // the length in byte 3, v1 in byte 1. Try v2 first (everything this version
   // writes), fall back to v1 so marks made by 0.4.x still fold.
-  function foldParse(bits) { return foldParseAt(bits, 3, 5); }
+  function foldParse(bits) { return foldParseAt(bits); }
 
   // lenByte: which byte of the frame holds the content length.
   // overhead: bytes of framing around the content (magic/ver/type/len + crc).
-  function foldParseAt(bits, lenByte, overhead) {
+  function foldParseAt(bits) {
     var total = bits.length;
-    if (total < 16) return { status: 'not-detected', message: null, confidence: 0, crcOk: false };
-    var len = 0;
-    for (var i = lenByte * 8; i < lenByte * 8 + 8 && i < total; i++) len = (len << 1) | bits[i];
-    var frameBits = (overhead + len) * 8;
+    if (total < 24) return { status: 'not-detected', message: null, confidence: 0, crcOk: false };
+    // Read enough of the first copy to learn the stride: fixed types imply their
+    // size, variable types state it in a varint.
+    var probe = bitsToBytes(bits.slice(0, Math.min(total, 64)));
+    var size = frameSize(probe);
+    if (!size) return { status: 'not-detected', message: null, confidence: 0, crcOk: false };
+    var frameBits = size * 8;
     var reps = Math.floor(total / frameBits); // frameBits = (len+3)*8 ≥ 24, always > 0
     if (reps < 1) { reps = 1; frameBits = Math.min(frameBits, total); }
 
@@ -610,10 +685,8 @@
     if (bytes.length < 4) return { status: 'not-detected', message: null, confidence: 0, crcOk: false };
     var magicOk = bytes[0] === MAGIC;
     var f = parseFrame(bytes);
-    var crcOk = !!f, dlen = f ? f.len : bytes[1];
-    var content = f ? f.content : [];
-    var message = null;
-    if (f) { try { message = utf8Decode(Array.from(content)); } catch (e) { message = null; } } // cov-ignore: TextDecoder is non-fatal
+    var crcOk = !!f, dlen = f ? f.len : 0;
+    var message = f ? contentToMessage(f.content, f.type) : null;
     var status = !magicOk ? 'not-detected' : (crcOk ? (agreement >= 0.999 ? 'perfect' : 'corrected') : 'failed');
     var confidence = crcOk ? Math.min(1, 0.5 + 0.5 * agreement) : (magicOk ? Math.max(0, agreement - 0.5) : 0);
     return { status: status, message: crcOk ? message : null, confidence: +confidence.toFixed(3),
@@ -632,13 +705,36 @@
   // here, which is what the version field exists to make explicit rather than a
   // guess. That is a wire-format break and is why this is a minor bump.
   function parseFrame(bytes) {
-    if (!bytes || bytes.length < 6) return null;
+    // cov-ignore: callers all bounds-check before calling
+    if (!bytes || bytes.length < 4) return null;
     if (bytes[0] !== MAGIC) return null;
-    var ver = bytes[1], type = bytes[2], dlen = bytes[3];
-    if (ver !== FRAME_VER && ver !== VER_EXTENDED) return null;
-    if (dlen < 1 || 4 + dlen >= bytes.length) return null;
-    if (bytes[4 + dlen] !== crc8(bytes.slice(0, 4 + dlen))) return null;
-    return { ver: ver, type: type, content: bytes.slice(4, 4 + dlen), len: dlen };
+    var ver = (bytes[1] >> 5) & 7, code = bytes[1] & 31;
+    // Strictly this version. VER_EXTENDED is reserved but not implemented, and
+    // accepting it here would double the chance a random byte passes the version
+    // check — which matters because the resync scanner tests thousands of offsets
+    // and a CRC8 validates by chance about 1 in 256.
+    if (ver !== FRAME_VER) return null;
+
+    var fixed = TYPE_SIZE[code], at = 2, len;
+    if (fixed) { len = fixed; } else {
+      var v = getVarint(bytes, 2);
+      if (!v) return null;
+      len = v.value; at = v.next;
+    }
+    if (len < 1 || at + len >= bytes.length) return null;
+    if (bytes[at + len] !== crc8(bytes.slice(0, at + len))) return null;
+    return { ver: ver, type: code, content: bytes.slice(at, at + len), len: len };
+  }
+
+  // How many bytes a frame occupies, read from its own header. Folding repeated
+  // copies needs the stride before it can vote, and the header is what states it.
+  function frameSize(bytes) {
+    if (!bytes || bytes.length < 3 || bytes[0] !== MAGIC) return null;
+    var code = bytes[1] & 31, fixed = TYPE_SIZE[code];
+    if (fixed) return 2 + fixed + 1;
+    var v = getVarint(bytes, 2);
+    if (!v) return null;
+    return v.next + v.value + 1;
   }
 
   function frameToResult(bytes, extra) {
@@ -649,8 +745,7 @@
       return Object.assign({ status: magicOk ? 'failed' : 'not-detected', message: null,
         confidence: 0, payloadBytes: magicOk ? bytes[3] : 0, crcOk: false, rawMessage: null }, extra);
     }
-    var message = null;
-    try { message = utf8Decode(Array.from(f.content)); } catch (e) { message = null; } // cov-ignore: TextDecoder is non-fatal, never throws
+    var message = contentToMessage(f.content, f.type);
     return Object.assign({
       status: (extra && extra.corrected) ? 'corrected' : 'perfect', // cov-ignore: extra.corrected unused by decodeRLNC
       message: message, confidence: 1, payloadBytes: f.len, crcOk: true, rawMessage: message,
@@ -666,22 +761,34 @@
   // whose later copies were shifted by an edit.
   function scanFrame(text, id, key, maxSites) {
     var def = CLASS_DEFS[id], digits = classDigits(text, id), phases = phaseCount(key, digits.length);
+    var seen = {}, best = null;
+
+    // Collect every frame that parses, across phases and byte offsets, and count
+    // how often each distinct payload appears. A CRC8 validates by chance about
+    // once in 256, and this scan tests thousands of windows, so the first frame
+    // that parses is not necessarily the real one — an unknown-type payload was
+    // being lost to exactly that. Real frames repeat (the payload is written many
+    // times over); a chance match does not. Frequency separates them.
     for (var ph = 0; ph < phases; ph++) {
-      var bits = phaseBits(digits, ph, def, key, id, maxSites);
-      var bytes = bitsToBytes(bits);
+      var bytes = bitsToBytes(phaseBits(digits, ph, def, key, id, maxSites));
       for (var o = 0; o + 4 <= bytes.length; o++) {
         if (bytes[o] !== MAGIC) continue;
         var f = parseFrame(bytes.slice(o));
         if (!f) continue;
-        var message = null;
-        try { message = utf8Decode(Array.from(f.content)); } catch (e) { message = null; } // cov-ignore: TextDecoder is non-fatal
-        return { status: 'corrected', message: message, confidence: 0.75, agreement: 1,
-          reps: 1, payloadBytes: f.len, crcOk: true, rawMessage: message, resynced: true,
-          type: TYPE_NAME[f.type] || ('0x' + f.type.toString(16)), typeCode: f.type,
-          frameVersion: 'v' + f.ver, bytes: f.content };
+        var sig = f.type + ':' + f.content.join(',');
+        var hit = seen[sig];
+        if (hit) { hit.n++; } else { seen[sig] = hit = { n: 1, f: f }; }
+        if (!best || hit.n > best.n) best = hit;
       }
     }
-    return null;
+    if (!best) return null;
+
+    var frame = best.f;
+    var message = contentToMessage(frame.content, frame.type);
+    return { status: 'corrected', message: message, confidence: 0.75, agreement: 1,
+      reps: best.n, payloadBytes: frame.len, crcOk: true, rawMessage: message, resynced: true,
+      type: TYPE_NAME[frame.type] || ('0x' + frame.type.toString(16)), typeCode: frame.type,
+      frameVersion: 'v' + frame.ver, bytes: frame.content };
   }
 
   // RLNC decode: pool self-checking packets from ALL channels, recover any K.
@@ -825,14 +932,18 @@
     // implementation cannot catch the implementation drifting from the spec.
     frame: {
       version: FRAME_VER,
-      fields: ['magic(0xA5)', 'ver(1B)', 'type(1B)', 'len(1B)', 'content', 'crc8'],
-      overheadBytes: 5,
+      layout: '[magic][ver:3|type:5][len varint, variable types only][content][crc8]',
+      fields: ['magic(0xA5)', 'ver:3|type:5 (1B)', 'len(varint, omitted for fixed types)', 'content', 'crc8'],
+      overheadBytes: { fixedType: 3, variableType: 4 },
       integrity: 'crc8',
       sync: 'magic byte',
       types: TYPE,
-      reserved: { version: VER_EXTENDED, type: TYPE.extended },
-      note: 'v1 frames (0.4.x: magic/len/content/crc, no version or type) are NOT read — ' +
-        'parsing two layouts doubled the chance of a chance-CRC false frame, so the break is explicit'
+      fixedSizes: TYPE_SIZE,
+      reserved: { version: VER_EXTENDED, type: TYPE_EXTENDED },
+      note: 'ver and type share a byte, fixed types imply their length and carry none, and ' +
+        'variable types use a 7-bit-per-byte varint (no 255 ceiling). Fixed types also compact: ' +
+        'a uuid travels as 16 raw bytes rather than 36 characters, a sha256 as 32 rather than 64. ' +
+        'Frames written by 0.4.x are not read — the version field makes that break explicit.'
     },
     modem: { type: 'mixed-radix', blocked: true, blockCapBits: 32, note: 'ECC bit stream is packed into per-site carrier symbols by blocked mixed-radix (base) conversion, recovering fractional bits of non-power-of-two radices; blocks bound a damaged symbol to ≤32 bits' },
     coding: { symbolLayer: 'mixed-radix (blocked)', blocks: true, interleave: 'keyed (opt-in)', pn: 'keyed (opt-in)', softDecision: false },
