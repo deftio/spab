@@ -286,17 +286,19 @@
   // choose something before seeing it work has been left out.
   var TRY_PARAMS = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
 
-  // Long enough to hold several copies of the payload. A passage that fits exactly
-  // one copy cannot survive an edit no matter how good the decoder is, and a demo
-  // that invites editing should not be built on one.
-  var TRY_SAMPLE = 'Every document carries more than its words. The spacing between them, the shape ' +
-    'of a quote, the kind of dash - these are choices a reader never notices, and they can be made ' +
-    'on purpose. Replace this paragraph with any other, pick a secret, and the mark travels with ' +
-    'the text wherever it is copied. A mark is only as good as the room the text gives it: a short ' +
-    'note holds one copy and little else, while a few paragraphs hold several, and it is the spare ' +
-    'copies that survive an edit. Nothing here changes what the words say - the only thing that ' +
-    'changes is which of several identical-looking characters was chosen at each opportunity, and ' +
-    'no reader has ever noticed one of those.';
+  // A document of the kind someone would actually mark, long enough to carry three
+  // copies of the payload. A passage that fits exactly one copy cannot survive an
+  // edit however good the decoder is, and a demo that invites editing must not be
+  // built on one.
+  var TRY_SAMPLE = 'The board reviewed the quarterly figures on Tuesday and asked for a re-forecast ' +
+    'before the end of the month. Operating costs are down year-over-year, though the well-documented ' +
+    'delays on the Hartley contract haven\'t yet worked through the numbers. Finance will circulate a ' +
+    'revised model on Friday; it isn\'t final, and the committee\'s own estimate may differ once the ' +
+    'half-year audit closes. Please don\'t forward this outside the working group. Each recipient\'s ' +
+    'copy carries its own identifier, so if a draft turns up somewhere it shouldn\'t, we will know ' +
+    'which one it came from - and it won\'t be a matter of guesswork. Nothing in the text has been ' +
+    'altered to do that: the words, the punctuation and the line breaks are exactly as written, and ' +
+    'a reader comparing two copies side by side would not find a single character out of place.';
 
   // Two stages, left to right: original + secret in, watermarked + recovered out.
   //

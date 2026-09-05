@@ -7,6 +7,22 @@ the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
 
+### Added
+- **`autoGrow` (opt-in) and `redundancy`, for payloads a passage cannot hold.** Substitution carriers
+  are bounded by the text, so a long secret in a short passage used to encode one truncated copy that
+  decoded to nothing. `autoGrow: true` enables the zero-width carrier and raises its density until the
+  payload fits, aiming for `redundancy` copies (default 3 — growing to a single copy would trade a
+  broken mark for a fragile one). Decoding needs no flag: zero-width characters are self-evident, so
+  `decode()` reads that channel whenever the text contains them.
+
+  It is opt-in on purpose. Defaulting it on turned every "does not fit" case into a silent length
+  change and the fuzz suite caught it immediately — 894 length-changed failures. Substitution
+  carriers leave the text byte-for-byte the same length, and that invariant is the point.
+- **Word-boundary detection now skips zero-width characters.** Inserting a zero-width carrier after a
+  space stopped that space being seen as an inter-word gap, silently destroying the whitespace
+  channel underneath it (measured: 10 sites before, 0 after). Invisible characters must not change
+  what counts as a word boundary; the two carriers now coexist.
+
 ### Fixed
 - **The decoder now resynchronises after an edit that adds or removes a carrier site.** Deleting a
   word usually collapses two gaps into one, removing a site and shifting the whole symbol stream;

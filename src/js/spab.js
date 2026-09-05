@@ -28,6 +28,12 @@
   SPACE_MAP.forEach(function (c, i) { WS_SET[c] = i; });
 
   function isWordChar(ch) { return !!ch && !/\s/.test(ch) && !(ch in WS_SET) && !(ch in ZW_SET); }
+  // Neighbours, skipping zero-width characters. They are invisible, so they must
+  // not change what counts as a word boundary: without this, inserting a
+  // zero-width carrier after a space stops that space being seen as an inter-word
+  // gap and silently destroys the whitespace channel underneath it.
+  function wordCharBefore(text, i) { var j = i - 1; while (j >= 0 && (text[j] in ZW_SET)) j--; return j >= 0 ? text[j] : ''; }
+  function wordCharAfter(text, i) { var j = i + 1; while (j < text.length && (text[j] in ZW_SET)) j++; return j < text.length ? text[j] : ''; }
 
   // Dense length-preserving whitespace: 8 space variants => 3 bits per inter-word gap
   // (vs 2 for `ws`). Higher capacity, still no added characters; some variants differ
@@ -44,6 +50,12 @@
   var ZW_SET = {};
   ZW_STR.forEach(function (c, i) { ZW_SET[c] = i; });
   var ZW_DENSITY = 6; // default zero-width chars inserted per word gap (12 bits/gap)
+  // Ceiling for auto-grow. Each step adds one invisible character per word gap, so
+  // the tarball grows by roughly (gaps x 3) bytes per step in UTF-8. 64 lets a
+  // short note carry a few hundred bytes; beyond that the caller should be passing
+  // a longer cover text rather than inflating a small one indefinitely.
+  var ZW_MAX_DENSITY = 64;
+  var AUTO_GROW_REPS = 3;   // copies to aim for when growing a passage to fit
 
   // Each class: radix (alphabet size = distinct symbols per site), bits (= floor(log2 radix),
   // kept for display/back-compat), detect(text)->[indices], read(text,i)->digit(0..radix-1),
@@ -55,7 +67,7 @@
         var out = [];
         for (var i = 1; i < text.length - 1; i++) {
           var ch = text[i];
-          if ((ch === ' ' || ch in WS_SET) && isWordChar(text[i - 1]) && isWordChar(text[i + 1])) out.push(i);
+          if ((ch === ' ' || ch in WS_SET) && isWordChar(wordCharBefore(text, i)) && isWordChar(wordCharAfter(text, i))) out.push(i);
         }
         return out;
       },
@@ -88,7 +100,7 @@
       detect: function (text) {
         var out = [];
         for (var i = 1; i < text.length - 1; i++) {
-          if ((text[i] in WSDENSE_SET) && isWordChar(text[i - 1]) && isWordChar(text[i + 1])) out.push(i);
+          if ((text[i] in WSDENSE_SET) && isWordChar(wordCharBefore(text, i)) && isWordChar(wordCharAfter(text, i))) out.push(i);
         }
         return out;
       },
@@ -151,6 +163,10 @@
 
   // Read one class's bit stream from its own sites (independent channel). Insert-kind
   // carriers (zero-width) recover their bits by extraction rather than site reads.
+  function hasZeroWidth(text) {
+    for (var i = 0; i < text.length; i++) if (text[i] in ZW_SET) return true;
+    return false;
+  }
   function classDigits(text, id) {
     var def = CLASS_DEFS[id], digits;
     if (def.kind === 'ins') digits = def.extract(text);
@@ -270,6 +286,11 @@
   var MAGIC = 0xA5;
   function buildFrame(message) {
     var content = utf8Encode(message);
+    // The frame's length field is one byte, so 255 content bytes is a hard format
+    // limit. Truncating here is deliberate and covered by a test — but note it
+    // encodes cleanly and then decodes to a DIFFERENT message than the caller
+    // passed, which callers cannot detect without comparing. metadata.payloadBytes
+    // reports what was actually carried; compare it against the message length.
     if (content.length > 255) content = content.slice(0, 255);
     var frame = [MAGIC, content.length].concat(content);
     frame.push(crc8(frame));
@@ -369,6 +390,60 @@
     var key = params.key;             // optional keyed scramble (interleave + whitening)
     var insPlans = []; // insert-kind carriers applied after substitution carriers
 
+    // ---- auto-grow: make room for a payload the cover text cannot hold ----
+    //
+    // Substitution carriers are bounded by the text: a passage has however many
+    // spaces and quotes it has, and a long payload simply does not fit — encode
+    // used to emit one truncated copy and a warning, which decodes to nothing.
+    // The zero-width carrier inserts rather than substitutes, so its capacity is
+    // set by `density` (zero-width chars per word gap) and can be raised until the
+    // payload fits. That is the StegCloak trade: the text reads identically and
+    // keeps its visible length, but it now carries extra invisible characters, so
+    // the byte count grows and the mark is obvious to anyone looking at hex.
+    //
+    // `redundancy` is how many copies of the frame to aim for. When growth is
+    // needed it defaults to 3 rather than 1: these are cases that previously
+    // encoded a truncated copy and decoded to nothing, so there is no behaviour to
+    // preserve, and a single copy is brittle by construction — one edit anywhere
+    // destroys it. Growing to one copy would trade a broken mark for a fragile
+    // one. Passages that already fit are untouched.
+    var redundancy = Math.max(1, params.redundancy || AUTO_GROW_REPS);
+    // OPT-IN, deliberately. Growing means inserting zero-width characters, which
+    // breaks the invariant most callers are here for: substitution carriers leave
+    // the text byte-for-byte the same length. Defaulting this on turned every
+    // "payload does not fit" case into a silent length change — the fuzz suite
+    // caught it as 894 length-changed failures. A caller who wants a payload
+    // larger than the text can hold has to say so.
+    var autoGrow = params.autoGrow === true && ids.length > 0;
+    if (autoGrow) {
+      var oneCopy = (ecc === 'rlnc' ? K * 32 : frameBits.length);
+      var needBits = oneCopy * redundancy;
+      var subCap = 0;
+      ids.forEach(function (id) {
+        var d = CLASS_DEFS[id];
+        if (d.kind === 'ins') return;
+        subCap = Math.max(subCap, symCapacityBits(filledRadices(d.detect(cover).length, d.radix), maxSites));
+      });
+      // Grow only when the payload does not fit AT ALL. Length preservation is the
+      // property most callers are here for, so a passage that holds even one copy
+      // is left exactly as written — growing it to reach the redundancy target
+      // would inflate text that was working. Once growth is unavoidable, though,
+      // size for `redundancy` copies: the characters are being inserted anyway.
+      if (subCap < oneCopy) {
+        if (ids.indexOf('zwsp') < 0) ids = ids.concat(['zwsp']);
+        var gaps = CLASS_DEFS.zwsp.anchors(cover).length;
+        if (gaps > 0) {
+          // Raise density until the zero-width channel alone covers the target.
+          // Capacity is not exactly gaps*density*2 bits (mixed-radix blocks round
+          // down), so ask the packer rather than assuming.
+          var want = density;
+          while (want < ZW_MAX_DENSITY &&
+                 symCapacityBits(filledRadices(gaps * want, CLASS_DEFS.zwsp.radix), maxSites) < needBits) want++;
+          density = want;
+        }
+      }
+    }
+
     ids.forEach(function (id) {
       var def = CLASS_DEFS[id], isIns = def.kind === 'ins';
       var idx = isIns ? def.anchors(cover) : def.detect(cover);
@@ -414,7 +489,14 @@
 
     // Warnings from the strongest channel (the one carrying the most copies).
     var best = null;
-    Object.keys(channels).forEach(function (id) { if (!best || channels[id].reps > channels[best].reps) best = id; });
+    Object.keys(channels).forEach(function (id) {
+      if (!best) { best = id; return; }
+      var c = channels[id], b = channels[best];
+      var better = (!c.tooShort && b.tooShort) ||
+        (c.tooShort === b.tooShort && (c.reps > b.reps ||
+          (c.reps === b.reps && c.capacityBits > b.capacityBits)));
+      if (better) best = id;
+    });
     if (best) {
       var bc = channels[best];
       if (bc.tooShort) issues.push('Passage too short for any channel: needs ' + frameBits.length +
@@ -545,6 +627,13 @@
     params = params || {};
     var ids = resolveClasses(params);
     var key = params.key, maxSites = params.block || 0;
+
+    // Zero-width carriers announce themselves: the characters are either in the
+    // text or they are not. encode() adds this channel on its own when a payload
+    // will not fit the substitution carriers (see auto-grow), and a caller
+    // decoding with the same params would otherwise never look for it. Checking
+    // costs one scan and nothing at all when no such character is present.
+    if (ids.indexOf('zwsp') < 0 && hasZeroWidth(text)) ids = ids.concat(['zwsp']);
     if (params.ecc === 'rlnc') {
       var r = decodeRLNC(text, ids, key, maxSites);
       return { message: r.message, metadata: { status: r.status, confidence: r.confidence, ecc: 'rlnc',

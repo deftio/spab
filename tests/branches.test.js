@@ -280,6 +280,78 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
     'resync: rlnc recovers after a word is deleted');
 })();
 
+// -- word-boundary lookaround at the edges of the text --
+//
+// Neighbour checks skip zero-width characters so an inserted carrier cannot stop a
+// space being seen as an inter-word gap. When the skip walks off either end there
+// is no neighbour at all, and the gap is correctly not a site.
+(function () {
+  const ZW = '\u200B';
+  ok(SPAB.CLASS_DEFS.ws.detect(ZW + ' xy').length === 0,
+    'boundary: zero-width run off the start of the text yields no site');
+  ok(SPAB.CLASS_DEFS.ws.detect('xy ' + ZW).length === 0,
+    'boundary: zero-width run off the end of the text yields no site');
+  ok(SPAB.CLASS_DEFS.ws.detect('ab ' + ZW + ' cd').length === 0,
+    'boundary: a gap whose neighbour is only zero-width is not a site');
+  ok(SPAB.CLASS_DEFS.ws.detect('ab' + ZW + ' ' + ZW + 'cd').length === 1,
+    'boundary: zero-width padding around a real gap still counts as a site');
+})();
+
+// -- auto-grow: payloads that do not fit the cover text --
+//
+// Substitution carriers are bounded by the text. When a payload cannot fit even
+// once, encode enables the zero-width carrier and raises its density until it
+// does; the text reads identically but carries extra invisible characters.
+(function () {
+  const P = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
+  const SHORT = "Keep the spacing, she said, and the punctuation too. It's a well-known trick.";
+  const LONG = 'The board reviewed the quarterly figures on Tuesday and asked for a re-forecast ' +
+    'before the end of the month. Operating costs are down year-over-year, though the well-documented ' +
+    'delays on the Hartley contract have not yet worked through the numbers. Finance will circulate ' +
+    'a revised model on Friday and the committee will meet again after the half-year audit closes.';
+
+  // Fits already -> untouched. Length preservation is the property most callers want.
+  const keep = SPAB.encode(LONG, 'acme-42', P);
+  ok(keep.text.length === LONG.length, 'auto-grow: a passage that fits is left at its original length');
+  ok(keep.metadata.classes.indexOf('zwsp') < 0, 'auto-grow: zwsp not added when unnecessary');
+
+  // Does not fit -> grows, and decodes with the same params the caller passed.
+  const G = Object.assign({ autoGrow: true }, P);
+  const grown = SPAB.encode(SHORT, 'contract-2026-11', G);
+  ok(grown.text.length > SHORT.length, 'auto-grow: grows a passage too small for the payload');
+  ok(SPAB.decode(grown.text, P).message === 'contract-2026-11', 'auto-grow: grown text round-trips');
+  ok(grown.metadata.reps >= 2, 'auto-grow: sizes for redundancy once it must insert');
+
+  // Explicit redundancy is honoured.
+  const r5 = SPAB.encode(SHORT, 'acme-42', Object.assign({ redundancy: 5, autoGrow: true }, P));
+  ok(r5.metadata.reps >= 5, 'auto-grow: honours an explicit redundancy target');
+
+  // Opt out: back to the old truncate-and-warn behaviour.
+  const off = SPAB.encode(SHORT, 'contract-2026-11', P);
+  ok(off.text.length === SHORT.length, 'auto-grow: off by default, text left alone');
+  ok((off.metadata.issues || []).length > 0, 'auto-grow: off by default still reports the shortfall');
+
+  // Already asking for zwsp: no double-add, still works.
+  const withZw = SPAB.encode(SHORT, 'contract-2026-11', { classes: ['ws', 'zwsp'], ecc: 'repetition', autoGrow: true });
+  ok(SPAB.decode(withZw.text, { classes: ['ws', 'zwsp'], ecc: 'repetition' }).message === 'contract-2026-11',
+    'auto-grow: explicit zwsp is not added twice');
+
+  // A cover with no word gaps has nothing to insert into.
+  const nogaps = SPAB.encode('word', 'acme-42', Object.assign({ autoGrow: true }, P));
+  ok(typeof nogaps.text === 'string', 'auto-grow: a cover with no gaps does not throw');
+
+  // rlnc sizes by packets rather than frame bits.
+  const rp = { classes: ['ws', 'apos', 'hyphen'], ecc: 'rlnc', autoGrow: true };
+  const rg = SPAB.encode(SHORT, 'contract-2026-11', rp);
+  ok(SPAB.decode(rg.text, rp).message === 'contract-2026-11', 'auto-grow: rlnc grows and round-trips');
+
+  // Zero-width carriers are found on decode even when the caller did not ask.
+  ok(SPAB.decode(grown.text, { classes: ['ws'], ecc: 'repetition' }).message === 'contract-2026-11',
+    'auto-grow: decode detects zero-width carriers the caller did not list');
+  ok(SPAB.decode(LONG, { classes: ['ws'], ecc: 'repetition' }).message === null,
+    'auto-grow: text with no zero-width characters is unaffected');
+})();
+
 // -- frame scanner rejects spurious MAGIC bytes --
 //
 // The scanner walks every byte-aligned offset looking for [MAGIC][len][...][crc].
