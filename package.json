@@ -23,7 +23,9 @@
     "start-release": "node tools/start-release.js",
     "release": "node tools/release.js",
     "release:dry": "node tools/release.js --dry-run",
-    "noise": "node tests/noise.test.js"
+    "noise": "node tests/noise.test.js",
+    "characterize": "node r_and_d/characterize.js",
+    "compare": "node r_and_d/compare.js"
   },
   "//port": "1948 \u2014 the year Claude Shannon published 'A Mathematical Theory of Communication' (spab's entropy north star). Chosen to avoid the crowded 3000/8000/8080."
 }

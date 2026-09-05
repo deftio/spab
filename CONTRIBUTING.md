@@ -34,6 +34,7 @@ No install needed — Node ≥ 18, zero deps.
 npm run lint        # zero-dep lint gate — fails on ANY finding (tests/lint.js)
 npm test            # conformance + branch + noise-matrix tests
 npm run noise       # recovery across payload/cover sizes, carriers, ECC and damage models
+npm run characterize # research sweep: where spab works and where it does not (not a gate)
 npm run fuzz        # property-based fuzzing (deterministic; tests/fuzz.test.js)
 npm run coverage    # branch/function/line coverage of src/js/spab.js (zero-dep, V8)
 npm run coverage:strict   # same, but exit 1 if below thresholds (branches 100%)
