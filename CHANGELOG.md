@@ -8,6 +8,32 @@ the wire format is still settling, so minor versions may change it.
 ## [Unreleased]
 
 ### Added
+- **`tests/noise.test.js` — a deterministic recovery matrix.** Payload sizes (1 to 59 bytes) x cover
+  sizes (90 to 1800 chars) x carriers (default, ws-only, keyed, zero-width) x ECC modes x 14 damage
+  models, asserting behaviour rather than pinned percentages: every combination round-trips or
+  reports honestly that it did not fit, carrier-preserving damage is always recovered (176 checks),
+  structural damage degrades rather than cliff-edging and improves with redundancy (50% -> 80% from
+  1 to 8 copies), and no combination ever reports a payload from unmarked text (80 checks). Also
+  pins the payload shapes that are supported: identifiers, JSON, Unicode, emoji, base64, text with
+  spaces. Wired into `npm test`, `npm run ci`, coverage and the CI workflow.
+- **The decoder reports how it read a mark.** `spab decode` prints the payload on stdout and a
+  report on stderr (status, confidence, surviving channel, ECC mode, copies/packets, payload bytes,
+  CRC), so piping stays clean; `--json` emits the full metadata, and a new `spab inspect` reports
+  capacity, carrier sites, zero-width count and the decode result together. It states explicitly
+  that the frame carries no type or encryption field rather than letting the absence read as
+  "not encrypted".
+- **`dev/roadmap.md`** tracking the work this release does not do: typed payloads, compact binary
+  JSON (JSON -> binary -> compress -> ECC -> carriers), authenticated encryption, payloads over 255
+  bytes, redundancy sizing for substitution-only encoding, keyed marks tolerating a change in
+  carrier count, NFKC capacity, the whitespace width tell, and a recovery benchmark in CI.
+
+### Found
+- **Keyed marks break when text is appended.** The interleave permutation is derived from the digit
+  count, so adding carriers anywhere — including a sentence at the end, which is otherwise harmless
+  — descrambles to noise. Surfaced by the new matrix, documented, and tracked in the roadmap; it is
+  also why resynchronisation is disabled when a key is set.
+
+### Added
 - **`autoGrow` (opt-in) and `redundancy`, for payloads a passage cannot hold.** Substitution carriers
   are bounded by the text, so a long secret in a short passage used to encode one truncated copy that
   decoded to nothing. `autoGrow: true` enables the zero-width carrier and raises its density until the

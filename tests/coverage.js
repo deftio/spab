@@ -27,6 +27,7 @@ const TARGET = path.resolve(ROOT, 'src/js/spab.js');
 const SUITES = [
   ['tests/roundtrip.test.js', []],
   ['tests/branches.test.js', []],
+  ['tests/noise.test.js', []],
   ['tests/fuzz.test.js', ['--iterations', '400']]
 ].filter(function (s) { return fs.existsSync(path.resolve(ROOT, s[0])); });
 
