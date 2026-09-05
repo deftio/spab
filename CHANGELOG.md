@@ -7,6 +7,8 @@ the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-09-04
+
 ### Added
 - **`tests/noise.test.js` — a deterministic recovery matrix.** Payload sizes (1 to 59 bytes) x cover
   sizes (90 to 1800 chars) x carriers (default, ws-only, keyed, zero-width) x ECC modes x 14 damage
