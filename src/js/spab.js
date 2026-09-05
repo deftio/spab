@@ -113,8 +113,16 @@
       kind: 'ins', radix: 4, bits: 2,
       anchors: function (text) { return CLASS_DEFS.ws.detect(text); }, // insert after inter-word spaces
       // embed a flat digit stream (perGap zero-width chars per word gap).
-      embed: function (text, digits, perGap) {
-        var idx = this.anchors(text), run = {}, pos = 0;
+      // `at` is the anchor set encode planned against, taken from the ORIGINAL cover.
+      // Recomputing anchors here instead was a latent bug: substitution carriers run
+      // first, and wsdense swaps spaces for variants outside the whitespace class's
+      // own set, so the anchors it found afterwards were fewer than the digit stream
+      // was sized for. The stream was silently truncated, which unkeyed decoding
+      // partly tolerated and keyed decoding could not — the descramble permutation
+      // depends on the digit count. Substitution is one-for-one, so positions from
+      // the cover remain valid in the substituted text.
+      embed: function (text, digits, perGap, at) {
+        var idx = at || this.anchors(text), run = {}, pos = 0;
         for (var a = 0; a < idx.length; a++) {
           var s = '';
           for (var k = 0; k < perGap; k++) { s += ZW_STR[digits[pos++] || 0]; }
@@ -476,7 +484,7 @@
       var digits = bitsToSymbols(bits, radices, maxSites); // ECC bit stream -> carrier symbols
       if (key) digits = scramble(digits, def.radix, keySeed(key, id)); // opt-in interleave + whitening
       if (isIns) {
-        insPlans.push({ def: def, digits: digits, perGap: density });
+        insPlans.push({ def: def, digits: digits, perGap: density, at: idx });
       } else {
         for (var s = 0; s < idx.length; s++) arr[idx[s]] = def.glyph(digits[s]);
       }
@@ -485,7 +493,7 @@
     });
 
     var outText = arr.join('');
-    insPlans.forEach(function (pl) { outText = pl.def.embed(outText, pl.digits, pl.perGap); });
+    insPlans.forEach(function (pl) { outText = pl.def.embed(outText, pl.digits, pl.perGap, pl.at); });
 
     // Warnings from the strongest channel (the one carrying the most copies).
     var best = null;
@@ -592,32 +600,58 @@
   // RLNC decode: pool self-checking packets from ALL channels, recover any K.
   function decodeRLNC(text, ids, key, maxSites) {
     var pool = {}, count = 0;
-    ids.forEach(function (id) {
-      var def = CLASS_DEFS[id], digits = classDigits(text, id), phases = phaseCount(key, digits.length);
-      // Phase 0 first, so an undamaged stream pools exactly the packets it always
-      // did; later phases only add what a shift had hidden. Packets stay on 32-bit
-      // boundaries within a phase — scanning every bit offset instead finds ~8
-      // false packets per document, and one false packet poisons the solve.
-      for (var ph = 0; ph < phases; ph++) {
+
+    // Pool packets from one block-grid phase across every channel.
+    function addPhase(ph) {
+      ids.forEach(function (id) {
+        var def = CLASS_DEFS[id], digits = classDigits(text, id);
+        if (ph >= phaseCount(key, digits.length)) return;
         parsePackets(phaseBits(digits, ph, def, key, id, maxSites)).forEach(function (pk) {
           if (!(pk.esi in pool)) { pool[pk.esi] = pk.val; count++; }
         });
-      }
-    });
-    if (count < 4) return { status: 'not-detected', message: null, confidence: 0, crcOk: false, packets: count };
-    var packets = Object.keys(pool).map(function (e) { return { esi: +e, val: pool[e] }; });
-    // K = source symbols = frame length = len + 3; get len from systematic packet esi=1 if clean.
-    var candidates = [];
-    if (1 in pool) candidates.push(pool[1] + 3);
-    for (var Kg = 4; Kg <= 80; Kg++) if (candidates.indexOf(Kg) < 0) candidates.push(Kg);
-    for (var ci = 0; ci < candidates.length; ci++) {
-      var K = candidates[ci];
-      if (packets.length < K) continue;
-      var src = rlncSolve(packets, K);
-      if (!src) continue; // cov-ignore: pairs with rlncSolve's under-rank return (unreachable with genuine packets)
-      var res = frameToResult(src, { channel: 'rlnc', packets: count });
-      if (res.crcOk) return res;
+      });
     }
+
+    // Phase 0 alone first — the ordinary case, and identical to what this always
+    // did. Extra phases are only reached when that fails, because they are not
+    // free: a packet CRC is 8 bits, so roughly 1 window in 256 validates by
+    // chance, and a long stream swept across 32 phases offers thousands of
+    // windows. One false packet is enough to poison the linear solve, so the
+    // sweep is held back until there is nothing to lose by trying it.
+    addPhase(0);
+    // K = source symbols = frame length = len + 3; get len from systematic packet esi=1 if clean.
+    function attempt() {
+      var pk = Object.keys(pool).map(function (e) { return { esi: +e, val: pool[e] }; });
+      var cand = [];
+      if (1 in pool) cand.push(pool[1] + 3);
+      for (var Kg = 4; Kg <= 80; Kg++) if (cand.indexOf(Kg) < 0) cand.push(Kg);
+      for (var ci = 0; ci < cand.length; ci++) {
+        var K = cand[ci];
+        if (pk.length < K) continue;
+        var src = rlncSolve(pk, K);
+        if (!src) continue; // cov-ignore: pairs with rlncSolve's under-rank return (unreachable with genuine packets)
+        var res = frameToResult(src, { channel: 'rlnc', packets: count });
+        if (res.crcOk) return res;
+      }
+      return null;
+    }
+
+    var got = count >= 4 ? attempt() : null;
+    if (got) return got;
+
+    // Nothing solved from the aligned pass, so the stream may have been shifted by
+    // an inserted or deleted site. Widen to the other phases and try again. Note
+    // this runs even when phase 0 pooled almost nothing: a shift early in the text
+    // leaves the aligned pass with a handful of packets or none, and that is
+    // exactly the case the sweep exists for.
+    var maxPh = 1;
+    ids.forEach(function (id) { maxPh = Math.max(maxPh, phaseCount(key, classDigits(text, id).length)); });
+    for (var ph = 1; ph < maxPh; ph++) addPhase(ph);
+
+    if (count < 4) return { status: 'not-detected', message: null, confidence: 0, crcOk: false, packets: count };
+    got = attempt();
+    if (got) return got;
+
     return { status: 'failed', message: null, confidence: 0, crcOk: false, packets: count, channel: 'rlnc' };
   }
 

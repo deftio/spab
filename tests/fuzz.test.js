@@ -82,6 +82,8 @@ for (let i = 0; i < ITERS; i++) {
   const params = { classes: pick(r, CLASS_SETS), ecc: pick(r, ECCS) };
   if (r() < 0.3) params.key = 'k' + randInt(r, 0, 9999);      // exercise keyed scramble (same key both ways)
   if (r() < 0.15) params.block = randInt(r, 3, 20);           // exercise the block-size knob
+  if (r() < 0.25) params.autoGrow = true;                     // exercise growing to fit an oversized payload
+  if (params.autoGrow && r() < 0.5) params.redundancy = randInt(r, 1, 5);
 
   // --- invariant 1: round-trip when capacity allows ---
   let enc;
@@ -95,11 +97,29 @@ for (let i = 0; i < ITERS; i++) {
     catch (e) { fail(seed, i, 'decode threw: ' + e.message, { message, params }); continue; }
     checked++;
     if (dec.message !== message) fail(seed, i, 'round-trip mismatch', { got: dec.message, want: message, params, status: dec.metadata.status });
-    // substitution carriers preserve length; the insert carrier (zwsp) adds zero-width
-    // chars but must leave the VISIBLE text identical.
-    const isInsert = Array.isArray(params.classes) && params.classes.indexOf('zwsp') !== -1;
-    if (!isInsert && enc.text.length !== cover.length) fail(seed, i, 'length changed by encode', { params });
-    if (isInsert && enc.text.replace(/[​‌‍⁠]/g, '') !== cover) fail(seed, i, 'zwsp altered visible text', { params });
+    // The visible text must be identical no matter which carriers ran — that is the
+    // universal contract. Length preservation is narrower: it holds only when the
+    // encoder used substitution carriers alone, so ask the metadata what it
+    // actually used rather than inferring it from the request. auto-grow may add
+    // an insert carrier the caller never listed, and that is allowed.
+    const used = enc.metadata.classes || [];
+    const usedInsert = used.indexOf('zwsp') !== -1;
+    const usedSub = used.some(function (c) { return c !== 'zwsp'; });
+    const stripped = enc.text.replace(/[​‌‍⁠]/g, '');
+
+    // Universal: the VISIBLE text is never lengthened or shortened. Substitution
+    // carriers swap a character for an equivalent one, insert carriers add only
+    // zero-width characters, so stripping those must return to the cover's length.
+    if (stripped.length !== cover.length) fail(seed, i, 'visible length changed by encode', { params });
+
+    // Insert-only runs change nothing else, so the stripped text must be identical.
+    // (With substitution carriers it will not be — that is the point of them.)
+    if (!usedSub && stripped !== cover) fail(seed, i, 'insert-only encode altered visible text', { params });
+
+    // Byte length is preserved only when no insert carrier ran. Read that from what
+    // the encoder used, not from what was requested: auto-grow may legitimately add
+    // an insert carrier the caller never listed.
+    if (!usedInsert && enc.text.length !== cover.length) fail(seed, i, 'length changed by substitution-only encode', { params });
   }
 
   // --- invariant 2: no false alarm on unmarked text ---

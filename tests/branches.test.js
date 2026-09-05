@@ -280,6 +280,20 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
     'resync: rlnc recovers after a word is deleted');
 })();
 
+// -- zwsp.embed called directly, without pre-computed anchors --
+//
+// encode() passes the anchor set it planned against (positions from the original
+// cover, which substitution preserves). Called standalone through the exported
+// CLASS_DEFS, embed falls back to locating anchors itself.
+(function () {
+  const text = 'one two three four';
+  const digits = [1, 2, 3, 0, 1, 2];
+  const out = SPAB.CLASS_DEFS.zwsp.embed(text, digits, 2);
+  ok(out.length > text.length, 'zwsp.embed without anchors inserts zero-width characters');
+  ok(out.replace(/[\u200B\u200C\u200D\u2060]/g, '') === text, 'zwsp.embed leaves the visible text identical');
+  ok(SPAB.CLASS_DEFS.zwsp.extract(out).length > 0, 'zwsp.extract reads back what embed wrote');
+})();
+
 // -- word-boundary lookaround at the edges of the text --
 //
 // Neighbour checks skip zero-width characters so an inserted carrier cannot stop a

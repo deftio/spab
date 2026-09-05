@@ -122,6 +122,13 @@ contains extra zero-width characters, so its **byte length grows** and the mark 
 inspecting the bytes. That is why it is opt-in: substitution carriers leave the text byte-for-byte
 the same length, and that is the property most callers are relying on.
 
+**Allowed, but not recommended.** Stuffing a large payload into a small passage works — this is the
+same trade StegCloak makes — and it is a reasonable choice when the mark only has to survive
+copy/paste between systems that preserve the characters. It is a poor choice when the mark is meant
+to go unnoticed: hundreds of zero-width characters in a short paragraph are trivially visible in a
+hex dump, survive no normalization, and are stripped by anything that filters invisible characters.
+Prefer giving the payload more cover text over inflating a short one.
+
 Decoding needs no flag. Zero-width characters are either present or not, so `decode()` looks for
 that channel whenever the text contains them, even if the caller did not list it.
 

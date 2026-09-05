@@ -15,15 +15,30 @@ the wire format is still settling, so minor versions may change it.
   broken mark for a fragile one). Decoding needs no flag: zero-width characters are self-evident, so
   `decode()` reads that channel whenever the text contains them.
 
-  It is opt-in on purpose. Defaulting it on turned every "does not fit" case into a silent length
-  change and the fuzz suite caught it immediately — 894 length-changed failures. Substitution
-  carriers leave the text byte-for-byte the same length, and that invariant is the point.
+  It is opt-in at the API, on by default in the front-page demo (so it just works whatever a visitor
+  types, with the growth reported in the result), and exposed as a toggle in the Playground. Stuffing
+  a large payload into a small passage is allowed — the same trade StegCloak makes — but a short
+  paragraph carrying hundreds of zero-width characters is trivially visible in a hex dump, so the
+  docs say plainly that it is allowed and not recommended.
+- **`tests/fuzz.test.js` asserted the wrong contract.** It inferred length preservation from the
+  requested `params.classes`, but that is a property of what the encoder *did*, not what was asked
+  for — so any encode that legitimately added an insert carrier was reported as a failure. The
+  invariants are now: visible length is never changed (universal), the visible text is identical
+  when only insert carriers ran, and byte length is preserved only when `metadata.classes` shows no
+  insert carrier was used. `autoGrow` and `redundancy` joined the permutation space.
 - **Word-boundary detection now skips zero-width characters.** Inserting a zero-width carrier after a
   space stopped that space being seen as an inter-word gap, silently destroying the whitespace
   channel underneath it (measured: 10 sites before, 0 after). Invisible characters must not change
   what counts as a word boundary; the two carriers now coexist.
 
 ### Fixed
+- **`zwsp.embed` recomputed its anchors instead of using the ones encode planned against** — a
+  latent bug, present before this release. Substitution carriers run first, and `wsdense` swaps
+  spaces for variants outside the whitespace class's own set, so the anchors found afterwards were
+  fewer than the digit stream had been sized for. The stream was silently truncated: unkeyed
+  decoding partly tolerated it, keyed decoding could not, because the descramble permutation depends
+  on the digit count. `classes: ['wsdense','zwsp']` with a key never round-tripped. Substitution is
+  one-for-one, so the cover's positions stay valid and are now passed through.
 - **The decoder now resynchronises after an edit that adds or removes a carrier site.** Deleting a
   word usually collapses two gaps into one, removing a site and shifting the whole symbol stream;
   blocks are cut from that stream by index, so every block after the edit decoded to noise. Adding

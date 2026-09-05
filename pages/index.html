@@ -50,7 +50,7 @@
     wsdense: { label: 'Dense whitespace — 8 space variants (length-preserving)' },
     zwsp:    { label: 'Dense zero-width — inserts invisible chars (StegCloak-style)' }
   };
-  var st = { cover: SAMPLE, msg: 'spab-2026', method: 'sparse', cls: { ws: true, apos: true, hyphen: true }, ecc: 'repetition', key: '', showCarriers: false, wm: null, params: null, meta: null, active: {} };
+  var st = { cover: SAMPLE, msg: 'spab-2026', method: 'sparse', cls: { ws: true, apos: true, hyphen: true }, ecc: 'repetition', key: '', autoGrow: false, showCarriers: false, wm: null, params: null, meta: null, active: {} };
   function R() { return Math.random(); }
   var A = {
     normalize:   { label: 'normalize', p: 0.3, fn: function (t, p) { return t.split('').map(function (ch) { var c = ch.charCodeAt(0); return (WSV.indexOf(c) >= 0 && R() < p) ? ' ' : ch; }).join(''); } },
@@ -63,10 +63,17 @@
     wordDelete:  { label: 'word delete', p: 0.1, fn: function (t, p) { return t.split(/(\s+)/).filter(function (_, i) { return i % 2 === 1 || R() >= p; }).join(''); } }
   };
   function params() {
-    if (st.method === 'wsdense') return { classes: ['wsdense'], ecc: st.ecc };
-    if (st.method === 'zwsp') return { classes: ['zwsp'], ecc: st.ecc };
-    var c = []; if (st.cls.ws) c.push('ws'); if (st.cls.apos) c.push('apos'); if (st.cls.hyphen) c.push('hyphen');
-    return { classes: c.length ? c : ['ws'], ecc: st.ecc };
+    var p;
+    if (st.method === 'wsdense') p = { classes: ['wsdense'], ecc: st.ecc };
+    else if (st.method === 'zwsp') p = { classes: ['zwsp'], ecc: st.ecc };
+    else {
+      var c = []; if (st.cls.ws) c.push('ws'); if (st.cls.apos) c.push('apos'); if (st.cls.hyphen) c.push('hyphen');
+      p = { classes: c.length ? c : ['ws'], ecc: st.ecc };
+    }
+    // Off by default here, unlike the front page: the Playground is where the
+    // trade-off should be visible rather than smoothed over.
+    if (st.autoGrow) p.autoGrow = true;
+    return p;
   }
   function withKey(p) { if (st.key) p.key = st.key; return p; }
   function applyAttacks(text) { Object.keys(A).forEach(function (k) { if (st.active[k]) text = A[k].fn(text, A[k].p); }); return text; }
@@ -242,7 +249,12 @@
               field('Carriers', { t: 'div', a: { id: 'carrierRow' } }),
               field('ECC', control(bw.makeSelect({ options: [{ value: 'repetition', text: 'repetition' }, { value: 'rlnc', text: 'RLNC fountain' }] }),
                 'onchange', function (e) { st.ecc = e.target.value; doEncode(); })),
-              field('Scramble key (optional)', bw.makeInput({ type: 'text', placeholder: 'none', value: st.key, oninput: function (e) { st.key = e.target.value; doEncode(); } }))
+              field('Scramble key (optional)', bw.makeInput({ type: 'text', placeholder: 'none', value: st.key, oninput: function (e) { st.key = e.target.value; doEncode(); } })),
+              field('Oversized payloads', { t: 'div', c: [
+                checkbox('auto-grow with zero-width', st.autoGrow, function (e) { st.autoGrow = e.target.checked; doEncode(); }),
+                { t: 'div', a: { style: bw.s({ fontSize: '12.5px', opacity: '.72', marginTop: '2px' }) },
+                  c: 'Adds invisible characters when the payload will not fit. The words are unchanged, but the byte length grows and the mark shows in a hex dump. Allowed — not recommended for a mark meant to go unnoticed.' }
+              ] })
             ] },
             { t: 'div', a: { style: bw.s({ marginTop: '14px' }) }, c: bw.makeButton({ text: 'Encode ▶', variant: 'primary', onclick: doEncode }) },
             { t: 'div', a: { id: 'encMeta', style: bw.s({ marginTop: '16px' }) } },
@@ -284,7 +296,11 @@
   // recovery in the other direction. No carriers, no ECC choice, no attack sliders
   // — that is what /test is for. Anything that would make a first-time visitor
   // choose something before seeing it work has been left out.
-  var TRY_PARAMS = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
+  // autoGrow on: the front page should just work whatever someone types. A secret
+  // too large for the passage grows the text with zero-width characters rather
+  // than failing — allowed, and shown honestly in the note underneath. The
+  // Playground exposes the flag so the trade-off can be seen and turned off.
+  var TRY_PARAMS = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition', autoGrow: true };
 
   // A document of the kind someone would actually mark, long enough to carry three
   // copies of the payload. A passage that fits exactly one copy cannot survive an
@@ -379,8 +395,12 @@
     var back = SPAB.decode(res.text, TRY_PARAMS);
     if (back.message === tr.secret) {
       tr.kind = 'success';
+      var grew = res.text.length - tr.cover.length;
       tr.note = '<b>Hidden.</b> ' + md.payloadBytes + ' bytes carried ' + md.reps +
-        '\u00d7 over ' + md.slots + ' sites.';
+        '\u00d7 over ' + md.slots + ' sites.' +
+        (grew > 0 ? ' The secret was larger than this passage could hold, so <b>' + grew +
+          ' invisible characters</b> were added — the words are unchanged, but the text is now ' +
+          'longer in bytes and the mark is obvious to anyone reading the raw file.' : '');
     } else {
       tr.kind = 'warning';
       tr.note = '<b>This passage is too short for that secret.</b> It needs ' + md.frameBits +
