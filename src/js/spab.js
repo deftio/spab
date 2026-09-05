@@ -28,6 +28,12 @@
   SPACE_MAP.forEach(function (c, i) { WS_SET[c] = i; });
 
   function isWordChar(ch) { return !!ch && !/\s/.test(ch) && !(ch in WS_SET) && !(ch in ZW_SET); }
+  // Neighbours, skipping zero-width characters. They are invisible, so they must
+  // not change what counts as a word boundary: without this, inserting a
+  // zero-width carrier after a space stops that space being seen as an inter-word
+  // gap and silently destroys the whitespace channel underneath it.
+  function wordCharBefore(text, i) { var j = i - 1; while (j >= 0 && (text[j] in ZW_SET)) j--; return j >= 0 ? text[j] : ''; }
+  function wordCharAfter(text, i) { var j = i + 1; while (j < text.length && (text[j] in ZW_SET)) j++; return j < text.length ? text[j] : ''; }
 
   // Dense length-preserving whitespace: 8 space variants => 3 bits per inter-word gap
   // (vs 2 for `ws`). Higher capacity, still no added characters; some variants differ
@@ -44,6 +50,12 @@
   var ZW_SET = {};
   ZW_STR.forEach(function (c, i) { ZW_SET[c] = i; });
   var ZW_DENSITY = 6; // default zero-width chars inserted per word gap (12 bits/gap)
+  // Ceiling for auto-grow. Each step adds one invisible character per word gap, so
+  // the tarball grows by roughly (gaps x 3) bytes per step in UTF-8. 64 lets a
+  // short note carry a few hundred bytes; beyond that the caller should be passing
+  // a longer cover text rather than inflating a small one indefinitely.
+  var ZW_MAX_DENSITY = 64;
+  var AUTO_GROW_REPS = 3;   // copies to aim for when growing a passage to fit
 
   // Each class: radix (alphabet size = distinct symbols per site), bits (= floor(log2 radix),
   // kept for display/back-compat), detect(text)->[indices], read(text,i)->digit(0..radix-1),
@@ -55,7 +67,7 @@
         var out = [];
         for (var i = 1; i < text.length - 1; i++) {
           var ch = text[i];
-          if ((ch === ' ' || ch in WS_SET) && isWordChar(text[i - 1]) && isWordChar(text[i + 1])) out.push(i);
+          if ((ch === ' ' || ch in WS_SET) && isWordChar(wordCharBefore(text, i)) && isWordChar(wordCharAfter(text, i))) out.push(i);
         }
         return out;
       },
@@ -88,7 +100,7 @@
       detect: function (text) {
         var out = [];
         for (var i = 1; i < text.length - 1; i++) {
-          if ((text[i] in WSDENSE_SET) && isWordChar(text[i - 1]) && isWordChar(text[i + 1])) out.push(i);
+          if ((text[i] in WSDENSE_SET) && isWordChar(wordCharBefore(text, i)) && isWordChar(wordCharAfter(text, i))) out.push(i);
         }
         return out;
       },
@@ -101,8 +113,16 @@
       kind: 'ins', radix: 4, bits: 2,
       anchors: function (text) { return CLASS_DEFS.ws.detect(text); }, // insert after inter-word spaces
       // embed a flat digit stream (perGap zero-width chars per word gap).
-      embed: function (text, digits, perGap) {
-        var idx = this.anchors(text), run = {}, pos = 0;
+      // `at` is the anchor set encode planned against, taken from the ORIGINAL cover.
+      // Recomputing anchors here instead was a latent bug: substitution carriers run
+      // first, and wsdense swaps spaces for variants outside the whitespace class's
+      // own set, so the anchors it found afterwards were fewer than the digit stream
+      // was sized for. The stream was silently truncated, which unkeyed decoding
+      // partly tolerated and keyed decoding could not — the descramble permutation
+      // depends on the digit count. Substitution is one-for-one, so positions from
+      // the cover remain valid in the substituted text.
+      embed: function (text, digits, perGap, at) {
+        var idx = at || this.anchors(text), run = {}, pos = 0;
         for (var a = 0; a < idx.length; a++) {
           var s = '';
           for (var k = 0; k < perGap; k++) { s += ZW_STR[digits[pos++] || 0]; }
@@ -151,12 +171,39 @@
 
   // Read one class's bit stream from its own sites (independent channel). Insert-kind
   // carriers (zero-width) recover their bits by extraction rather than site reads.
-  function readClassBits(text, id, key, maxSites) {
+  function hasZeroWidth(text) {
+    for (var i = 0; i < text.length; i++) if (text[i] in ZW_SET) return true;
+    return false;
+  }
+  function classDigits(text, id) {
     var def = CLASS_DEFS[id], digits;
     if (def.kind === 'ins') digits = def.extract(text);
     else { var idx = def.detect(text); digits = new Array(idx.length); for (var s = 0; s < idx.length; s++) digits[s] = def.read(text, idx[s]); }
+    return digits;
+  }
+  function readClassBits(text, id, key, maxSites) {
+    var def = CLASS_DEFS[id], digits = classDigits(text, id);
     if (key) digits = descramble(digits, def.radix, keySeed(key, id)); // invert keyed scramble
     return symbolsToBits(digits, filledRadices(digits.length, def.radix), maxSites);
+  }
+
+  // ---------- resynchronisation ----------
+  // Inserting or deleting a carrier site (deleting a word usually collapses two
+  // gaps into one) shifts the whole symbol stream. Blocks are cut from that stream
+  // by index, so every block after the edit is cut one position off and decodes to
+  // noise — which is why raising redundancy never helped: the extra copies were
+  // shifted too. Re-cutting the grid at each phase restores the original block
+  // boundaries for whatever follows the edit.
+  //
+  // Phases are tried on the RAW digit stream, and only when unkeyed: the keyed
+  // scramble interleaves across the whole stream, so a shifted stream cannot be
+  // descrambled and sweeping it would produce noise.
+  var MAX_PHASE = 32;   // largest block length spab produces (radix-2 packs 32 sites)
+  function phaseCount(key, n) { return key ? 1 : Math.min(MAX_PHASE, n); }
+  function phaseBits(digits, ph, def, key, id, maxSites) {
+    var d = ph ? digits.slice(ph) : digits;
+    if (key) d = descramble(d, def.radix, keySeed(key, id));
+    return symbolsToBits(d, filledRadices(d.length, def.radix), maxSites);
   }
 
   // ---------- GF(256) + systematic RLNC fountain (ecc:'rlnc') ----------
@@ -247,6 +294,11 @@
   var MAGIC = 0xA5;
   function buildFrame(message) {
     var content = utf8Encode(message);
+    // The frame's length field is one byte, so 255 content bytes is a hard format
+    // limit. Truncating here is deliberate and covered by a test — but note it
+    // encodes cleanly and then decodes to a DIFFERENT message than the caller
+    // passed, which callers cannot detect without comparing. metadata.payloadBytes
+    // reports what was actually carried; compare it against the message length.
     if (content.length > 255) content = content.slice(0, 255);
     var frame = [MAGIC, content.length].concat(content);
     frame.push(crc8(frame));
@@ -346,6 +398,60 @@
     var key = params.key;             // optional keyed scramble (interleave + whitening)
     var insPlans = []; // insert-kind carriers applied after substitution carriers
 
+    // ---- auto-grow: make room for a payload the cover text cannot hold ----
+    //
+    // Substitution carriers are bounded by the text: a passage has however many
+    // spaces and quotes it has, and a long payload simply does not fit — encode
+    // used to emit one truncated copy and a warning, which decodes to nothing.
+    // The zero-width carrier inserts rather than substitutes, so its capacity is
+    // set by `density` (zero-width chars per word gap) and can be raised until the
+    // payload fits. That is the StegCloak trade: the text reads identically and
+    // keeps its visible length, but it now carries extra invisible characters, so
+    // the byte count grows and the mark is obvious to anyone looking at hex.
+    //
+    // `redundancy` is how many copies of the frame to aim for. When growth is
+    // needed it defaults to 3 rather than 1: these are cases that previously
+    // encoded a truncated copy and decoded to nothing, so there is no behaviour to
+    // preserve, and a single copy is brittle by construction — one edit anywhere
+    // destroys it. Growing to one copy would trade a broken mark for a fragile
+    // one. Passages that already fit are untouched.
+    var redundancy = Math.max(1, params.redundancy || AUTO_GROW_REPS);
+    // OPT-IN, deliberately. Growing means inserting zero-width characters, which
+    // breaks the invariant most callers are here for: substitution carriers leave
+    // the text byte-for-byte the same length. Defaulting this on turned every
+    // "payload does not fit" case into a silent length change — the fuzz suite
+    // caught it as 894 length-changed failures. A caller who wants a payload
+    // larger than the text can hold has to say so.
+    var autoGrow = params.autoGrow === true && ids.length > 0;
+    if (autoGrow) {
+      var oneCopy = (ecc === 'rlnc' ? K * 32 : frameBits.length);
+      var needBits = oneCopy * redundancy;
+      var subCap = 0;
+      ids.forEach(function (id) {
+        var d = CLASS_DEFS[id];
+        if (d.kind === 'ins') return;
+        subCap = Math.max(subCap, symCapacityBits(filledRadices(d.detect(cover).length, d.radix), maxSites));
+      });
+      // Grow only when the payload does not fit AT ALL. Length preservation is the
+      // property most callers are here for, so a passage that holds even one copy
+      // is left exactly as written — growing it to reach the redundancy target
+      // would inflate text that was working. Once growth is unavoidable, though,
+      // size for `redundancy` copies: the characters are being inserted anyway.
+      if (subCap < oneCopy) {
+        if (ids.indexOf('zwsp') < 0) ids = ids.concat(['zwsp']);
+        var gaps = CLASS_DEFS.zwsp.anchors(cover).length;
+        if (gaps > 0) {
+          // Raise density until the zero-width channel alone covers the target.
+          // Capacity is not exactly gaps*density*2 bits (mixed-radix blocks round
+          // down), so ask the packer rather than assuming.
+          var want = density;
+          while (want < ZW_MAX_DENSITY &&
+                 symCapacityBits(filledRadices(gaps * want, CLASS_DEFS.zwsp.radix), maxSites) < needBits) want++;
+          density = want;
+        }
+      }
+    }
+
     ids.forEach(function (id) {
       var def = CLASS_DEFS[id], isIns = def.kind === 'ins';
       var idx = isIns ? def.anchors(cover) : def.detect(cover);
@@ -378,7 +484,7 @@
       var digits = bitsToSymbols(bits, radices, maxSites); // ECC bit stream -> carrier symbols
       if (key) digits = scramble(digits, def.radix, keySeed(key, id)); // opt-in interleave + whitening
       if (isIns) {
-        insPlans.push({ def: def, digits: digits, perGap: density });
+        insPlans.push({ def: def, digits: digits, perGap: density, at: idx });
       } else {
         for (var s = 0; s < idx.length; s++) arr[idx[s]] = def.glyph(digits[s]);
       }
@@ -387,11 +493,18 @@
     });
 
     var outText = arr.join('');
-    insPlans.forEach(function (pl) { outText = pl.def.embed(outText, pl.digits, pl.perGap); });
+    insPlans.forEach(function (pl) { outText = pl.def.embed(outText, pl.digits, pl.perGap, pl.at); });
 
     // Warnings from the strongest channel (the one carrying the most copies).
     var best = null;
-    Object.keys(channels).forEach(function (id) { if (!best || channels[id].reps > channels[best].reps) best = id; });
+    Object.keys(channels).forEach(function (id) {
+      if (!best) { best = id; return; }
+      var c = channels[id], b = channels[best];
+      var better = (!c.tooShort && b.tooShort) ||
+        (c.tooShort === b.tooShort && (c.reps > b.reps ||
+          (c.reps === b.reps && c.capacityBits > b.capacityBits)));
+      if (better) best = id;
+    });
     if (best) {
       var bc = channels[best];
       if (bc.tooShort) issues.push('Passage too short for any channel: needs ' + frameBits.length +
@@ -460,28 +573,85 @@
       message: crcOk ? message : null, confidence: crcOk ? 1 : 0, payloadBytes: dlen, crcOk: crcOk, rawMessage: message }, extra || {});
   }
 
+  // Look for one intact frame anywhere in the stream, across block-grid phases and
+  // byte-aligned starts. Frames are self-contained and CRC-checked, so an intact
+  // copy needs no agreement from its neighbours — this is what recovers a payload
+  // whose later copies were shifted by an edit.
+  function scanFrame(text, id, key, maxSites) {
+    var def = CLASS_DEFS[id], digits = classDigits(text, id), phases = phaseCount(key, digits.length);
+    for (var ph = 0; ph < phases; ph++) {
+      var bits = phaseBits(digits, ph, def, key, id, maxSites);
+      var bytes = bitsToBytes(bits);
+      for (var o = 0; o + 4 <= bytes.length; o++) {
+        if (bytes[o] !== MAGIC) continue;
+        var dlen = bytes[o + 1];
+        if (dlen < 1 || o + 2 + dlen >= bytes.length) continue;
+        var content = bytes.slice(o + 2, o + 2 + dlen);
+        if (bytes[o + 2 + dlen] !== crc8(bytes.slice(o, o + 2 + dlen))) continue;
+        var message = null;
+        try { message = utf8Decode(content); } catch (e) { message = null; } // cov-ignore: TextDecoder is non-fatal
+        return { status: 'corrected', message: message, confidence: 0.75, agreement: 1,
+          reps: 1, payloadBytes: dlen, crcOk: true, rawMessage: message, resynced: true };
+      }
+    }
+    return null;
+  }
+
   // RLNC decode: pool self-checking packets from ALL channels, recover any K.
   function decodeRLNC(text, ids, key, maxSites) {
     var pool = {}, count = 0;
-    ids.forEach(function (id) {
-      parsePackets(readClassBits(text, id, key, maxSites)).forEach(function (pk) {
-        if (!(pk.esi in pool)) { pool[pk.esi] = pk.val; count++; }
+
+    // Pool packets from one block-grid phase across every channel.
+    function addPhase(ph) {
+      ids.forEach(function (id) {
+        var def = CLASS_DEFS[id], digits = classDigits(text, id);
+        if (ph >= phaseCount(key, digits.length)) return;
+        parsePackets(phaseBits(digits, ph, def, key, id, maxSites)).forEach(function (pk) {
+          if (!(pk.esi in pool)) { pool[pk.esi] = pk.val; count++; }
+        });
       });
-    });
-    if (count < 4) return { status: 'not-detected', message: null, confidence: 0, crcOk: false, packets: count };
-    var packets = Object.keys(pool).map(function (e) { return { esi: +e, val: pool[e] }; });
-    // K = source symbols = frame length = len + 3; get len from systematic packet esi=1 if clean.
-    var candidates = [];
-    if (1 in pool) candidates.push(pool[1] + 3);
-    for (var Kg = 4; Kg <= 80; Kg++) if (candidates.indexOf(Kg) < 0) candidates.push(Kg);
-    for (var ci = 0; ci < candidates.length; ci++) {
-      var K = candidates[ci];
-      if (packets.length < K) continue;
-      var src = rlncSolve(packets, K);
-      if (!src) continue; // cov-ignore: pairs with rlncSolve's under-rank return (unreachable with genuine packets)
-      var res = frameToResult(src, { channel: 'rlnc', packets: count });
-      if (res.crcOk) return res;
     }
+
+    // Phase 0 alone first — the ordinary case, and identical to what this always
+    // did. Extra phases are only reached when that fails, because they are not
+    // free: a packet CRC is 8 bits, so roughly 1 window in 256 validates by
+    // chance, and a long stream swept across 32 phases offers thousands of
+    // windows. One false packet is enough to poison the linear solve, so the
+    // sweep is held back until there is nothing to lose by trying it.
+    addPhase(0);
+    // K = source symbols = frame length = len + 3; get len from systematic packet esi=1 if clean.
+    function attempt() {
+      var pk = Object.keys(pool).map(function (e) { return { esi: +e, val: pool[e] }; });
+      var cand = [];
+      if (1 in pool) cand.push(pool[1] + 3);
+      for (var Kg = 4; Kg <= 80; Kg++) if (cand.indexOf(Kg) < 0) cand.push(Kg);
+      for (var ci = 0; ci < cand.length; ci++) {
+        var K = cand[ci];
+        if (pk.length < K) continue;
+        var src = rlncSolve(pk, K);
+        if (!src) continue; // cov-ignore: pairs with rlncSolve's under-rank return (unreachable with genuine packets)
+        var res = frameToResult(src, { channel: 'rlnc', packets: count });
+        if (res.crcOk) return res;
+      }
+      return null;
+    }
+
+    var got = count >= 4 ? attempt() : null;
+    if (got) return got;
+
+    // Nothing solved from the aligned pass, so the stream may have been shifted by
+    // an inserted or deleted site. Widen to the other phases and try again. Note
+    // this runs even when phase 0 pooled almost nothing: a shift early in the text
+    // leaves the aligned pass with a handful of packets or none, and that is
+    // exactly the case the sweep exists for.
+    var maxPh = 1;
+    ids.forEach(function (id) { maxPh = Math.max(maxPh, phaseCount(key, classDigits(text, id).length)); });
+    for (var ph = 1; ph < maxPh; ph++) addPhase(ph);
+
+    if (count < 4) return { status: 'not-detected', message: null, confidence: 0, crcOk: false, packets: count };
+    got = attempt();
+    if (got) return got;
+
     return { status: 'failed', message: null, confidence: 0, crcOk: false, packets: count, channel: 'rlnc' };
   }
 
@@ -491,6 +661,13 @@
     params = params || {};
     var ids = resolveClasses(params);
     var key = params.key, maxSites = params.block || 0;
+
+    // Zero-width carriers announce themselves: the characters are either in the
+    // text or they are not. encode() adds this channel on its own when a payload
+    // will not fit the substitution carriers (see auto-grow), and a caller
+    // decoding with the same params would otherwise never look for it. Checking
+    // costs one scan and nothing at all when no such character is present.
+    if (ids.indexOf('zwsp') < 0 && hasZeroWidth(text)) ids = ids.concat(['zwsp']);
     if (params.ecc === 'rlnc') {
       var r = decodeRLNC(text, ids, key, maxSites);
       return { message: r.message, metadata: { status: r.status, confidence: r.confidence, ecc: 'rlnc',
@@ -500,6 +677,11 @@
     var best = null, bestId = null;
     ids.forEach(function (id) {
       var c = foldParse(readClassBits(text, id, key, maxSites));
+      // Majority voting assumes every copy starts where the first one did. After an
+      // insertion or deletion the later copies are shifted, and folding averages
+      // intact copies together with noise. A single self-contained frame
+      // (magic/len/content/crc) is enough on its own, so go looking for one.
+      if (!c.crcOk) { var r = scanFrame(text, id, key, maxSites); if (r) c = r; }
       var better = !best ||
         (c.crcOk && !best.crcOk) ||
         (c.crcOk === best.crcOk && (rank[c.status] > rank[best.status] ||
@@ -547,7 +729,11 @@
     ecc: { type: 'repetition+majority', detail: 'frame repeated to fill capacity, per-bit majority vote' },
     frame: { fields: ['magic(0xA5)', 'len(1B)', 'content', 'crc8'], integrity: 'crc8', sync: 'magic byte' },
     modem: { type: 'mixed-radix', blocked: true, blockCapBits: 32, note: 'ECC bit stream is packed into per-site carrier symbols by blocked mixed-radix (base) conversion, recovering fractional bits of non-power-of-two radices; blocks bound a damaged symbol to ≤32 bits' },
-    coding: { symbolLayer: 'mixed-radix (blocked)', blocks: true, interleave: 'keyed (opt-in)', pn: 'keyed (opt-in)', softDecision: false }
+    coding: { symbolLayer: 'mixed-radix (blocked)', blocks: true, interleave: 'keyed (opt-in)', pn: 'keyed (opt-in)', softDecision: false },
+    resync: {
+      phases: MAX_PHASE,
+      note: 'Inserting or deleting a carrier site shifts the whole symbol stream, so blocks are cut one position off and everything after the edit decodes to noise — redundancy does not help, because every copy shifts together. The decoder therefore re-cuts the block grid at each phase: RLNC pools packets from all phases (32-bit aligned, so chance CRC hits stay out of the solve), and repetition falls back to scanning for one intact self-contained frame when majority folding fails. Disabled when a key is set: the keyed interleave spans the whole stream and cannot be undone on a shifted one.'
+    }
   };
 
   var SPAB = {

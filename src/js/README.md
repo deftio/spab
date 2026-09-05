@@ -90,6 +90,51 @@ SPAB.encode(text, msg, { ecc: 'rlnc' });         // GF(256) fountain; packets po
 self-checking, self-locating packets that pool across *all* channels, so surviving carriers can
 reconstruct the whole message. Both are dependency-free and hand-rolled.
 
+### Edits that add or remove text
+
+Inserting or deleting a word usually changes the number of carrier sites, which shifts the whole
+symbol stream — everything after the edit would otherwise decode to noise, no matter how much
+redundancy was spent. The decoder resynchronises: it re-cuts the block grid at each phase, pooling
+RLNC packets from every phase and, for repetition, scanning for one intact self-contained frame.
+
+Recovery still depends on having spare capacity. A passage that holds exactly one copy of the
+payload has nothing to fall back on when part of it is disturbed; give the text room for two or
+three copies and edits become survivable. `metadata.reps` tells you how many copies fit.
+
+Resynchronisation is disabled when `params.key` is set — the keyed interleave spans the whole
+stream and cannot be undone on a shifted one.
+
+## Payloads larger than the text can hold
+
+Substitution carriers are bounded by the text: a passage has however many spaces and quotes it has.
+When a payload does not fit, encode writes one truncated copy and says so in `metadata.issues`.
+
+`autoGrow` trades length preservation for capacity. It enables the zero-width carrier and raises its
+density until the payload fits, aiming for `redundancy` copies (default 3):
+
+```js
+SPAB.encode(shortText, longSecret, { autoGrow: true });
+SPAB.encode(shortText, longSecret, { autoGrow: true, redundancy: 5 });
+```
+
+The visible text is unchanged — same words, same punctuation, same line breaks — but the string now
+contains extra zero-width characters, so its **byte length grows** and the mark is obvious to anyone
+inspecting the bytes. That is why it is opt-in: substitution carriers leave the text byte-for-byte
+the same length, and that is the property most callers are relying on.
+
+**Allowed, but not recommended.** Stuffing a large payload into a small passage works — this is the
+same trade StegCloak makes — and it is a reasonable choice when the mark only has to survive
+copy/paste between systems that preserve the characters. It is a poor choice when the mark is meant
+to go unnoticed: hundreds of zero-width characters in a short paragraph are trivially visible in a
+hex dump, survive no normalization, and are stripped by anything that filters invisible characters.
+Prefer giving the payload more cover text over inflating a short one.
+
+Decoding needs no flag. Zero-width characters are either present or not, so `decode()` looks for
+that channel whenever the text contains them, even if the caller did not list it.
+
+The frame's length field is one byte, so **255 content bytes is a hard limit**. A longer message is
+silently truncated; compare `metadata.payloadBytes` against your message length if that matters.
+
 ## Optional keyed scramble
 
 ```js

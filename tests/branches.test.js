@@ -236,6 +236,164 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
   ok(sites.length > 0 && sites.some(function (s) { return s.id === 'zwsp'; }), 'getSites includes zwsp anchors');
 })();
 
+// -- resynchronising decode: an edit that adds or removes a carrier site --
+//
+// Deleting a word usually collapses two gaps into one, removing a site and
+// shifting the whole symbol stream. Blocks are then cut one position off, so
+// majority folding averages intact copies together with noise. These cover the
+// scan-for-an-intact-frame fallback and its rejection paths.
+(function () {
+  const BASE = 'Every document carries more than its words. The spacing between them, the shape ' +
+    'of a quote, the kind of dash - these are choices a reader never notices, and they can be ' +
+    'made on purpose. Replace this paragraph with any other, pick a secret, and the mark ' +
+    'travels with the text wherever it is copied. ';
+  const cover = BASE + BASE + BASE;
+  const params = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
+  const enc = SPAB.encode(cover, 'acme-42', params);
+
+  const deleted = enc.text.replace(' spacing', '');
+  const dd = SPAB.decode(deleted, params);
+  ok(dd.message === 'acme-42', 'resync: recovers after a word is deleted');
+  ok(dd.metadata.crcOk === true, 'resync: recovered frame passes CRC');
+
+  const inserted = enc.text.replace('a reader', 'a careful reader');
+  ok(SPAB.decode(inserted, params).message === 'acme-42', 'resync: recovers after a word is inserted');
+
+  ok(SPAB.decode('A sentence in front. ' + enc.text, params).message === 'acme-42',
+    'resync: recovers when text is prepended');
+
+  // Randomised carrier values: spurious MAGIC bytes appear and must be rejected
+  // on length or CRC, leaving nothing to report.
+  const WS = SPAB.SPACE_MAP;
+  let noise = '', n = 0;
+  for (const ch of enc.text) {
+    if (WS.indexOf(ch) >= 0) { noise += WS[(n * 7 + 3) % WS.length]; n++; } else { noise += ch; }
+  }
+  const nd = SPAB.decode(noise, params);
+  ok(nd.message === null || nd.message !== 'acme-42', 'resync: scrambled carriers do not yield the payload');
+  ok(SPAB.decode(cover, params).message === null, 'resync: unmarked text still decodes to null');
+
+  // RLNC pools packets across phases too, given enough repair margin.
+  const rp = { classes: ['ws', 'apos', 'hyphen'], ecc: 'rlnc' };
+  const renc = SPAB.encode(cover + cover, 'acme-42', rp);
+  ok(SPAB.decode(renc.text.replace(' spacing', ''), rp).message === 'acme-42',
+    'resync: rlnc recovers after a word is deleted');
+})();
+
+// -- zwsp.embed called directly, without pre-computed anchors --
+//
+// encode() passes the anchor set it planned against (positions from the original
+// cover, which substitution preserves). Called standalone through the exported
+// CLASS_DEFS, embed falls back to locating anchors itself.
+(function () {
+  const text = 'one two three four';
+  const digits = [1, 2, 3, 0, 1, 2];
+  const out = SPAB.CLASS_DEFS.zwsp.embed(text, digits, 2);
+  ok(out.length > text.length, 'zwsp.embed without anchors inserts zero-width characters');
+  ok(out.replace(/[\u200B\u200C\u200D\u2060]/g, '') === text, 'zwsp.embed leaves the visible text identical');
+  ok(SPAB.CLASS_DEFS.zwsp.extract(out).length > 0, 'zwsp.extract reads back what embed wrote');
+})();
+
+// -- word-boundary lookaround at the edges of the text --
+//
+// Neighbour checks skip zero-width characters so an inserted carrier cannot stop a
+// space being seen as an inter-word gap. When the skip walks off either end there
+// is no neighbour at all, and the gap is correctly not a site.
+(function () {
+  const ZW = '\u200B';
+  ok(SPAB.CLASS_DEFS.ws.detect(ZW + ' xy').length === 0,
+    'boundary: zero-width run off the start of the text yields no site');
+  ok(SPAB.CLASS_DEFS.ws.detect('xy ' + ZW).length === 0,
+    'boundary: zero-width run off the end of the text yields no site');
+  ok(SPAB.CLASS_DEFS.ws.detect('ab ' + ZW + ' cd').length === 0,
+    'boundary: a gap whose neighbour is only zero-width is not a site');
+  ok(SPAB.CLASS_DEFS.ws.detect('ab' + ZW + ' ' + ZW + 'cd').length === 1,
+    'boundary: zero-width padding around a real gap still counts as a site');
+})();
+
+// -- auto-grow: payloads that do not fit the cover text --
+//
+// Substitution carriers are bounded by the text. When a payload cannot fit even
+// once, encode enables the zero-width carrier and raises its density until it
+// does; the text reads identically but carries extra invisible characters.
+(function () {
+  const P = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
+  const SHORT = "Keep the spacing, she said, and the punctuation too. It's a well-known trick.";
+  const LONG = 'The board reviewed the quarterly figures on Tuesday and asked for a re-forecast ' +
+    'before the end of the month. Operating costs are down year-over-year, though the well-documented ' +
+    'delays on the Hartley contract have not yet worked through the numbers. Finance will circulate ' +
+    'a revised model on Friday and the committee will meet again after the half-year audit closes.';
+
+  // Fits already -> untouched. Length preservation is the property most callers want.
+  const keep = SPAB.encode(LONG, 'acme-42', P);
+  ok(keep.text.length === LONG.length, 'auto-grow: a passage that fits is left at its original length');
+  ok(keep.metadata.classes.indexOf('zwsp') < 0, 'auto-grow: zwsp not added when unnecessary');
+
+  // Does not fit -> grows, and decodes with the same params the caller passed.
+  const G = Object.assign({ autoGrow: true }, P);
+  const grown = SPAB.encode(SHORT, 'contract-2026-11', G);
+  ok(grown.text.length > SHORT.length, 'auto-grow: grows a passage too small for the payload');
+  ok(SPAB.decode(grown.text, P).message === 'contract-2026-11', 'auto-grow: grown text round-trips');
+  ok(grown.metadata.reps >= 2, 'auto-grow: sizes for redundancy once it must insert');
+
+  // Explicit redundancy is honoured.
+  const r5 = SPAB.encode(SHORT, 'acme-42', Object.assign({ redundancy: 5, autoGrow: true }, P));
+  ok(r5.metadata.reps >= 5, 'auto-grow: honours an explicit redundancy target');
+
+  // Opt out: back to the old truncate-and-warn behaviour.
+  const off = SPAB.encode(SHORT, 'contract-2026-11', P);
+  ok(off.text.length === SHORT.length, 'auto-grow: off by default, text left alone');
+  ok((off.metadata.issues || []).length > 0, 'auto-grow: off by default still reports the shortfall');
+
+  // Already asking for zwsp: no double-add, still works.
+  const withZw = SPAB.encode(SHORT, 'contract-2026-11', { classes: ['ws', 'zwsp'], ecc: 'repetition', autoGrow: true });
+  ok(SPAB.decode(withZw.text, { classes: ['ws', 'zwsp'], ecc: 'repetition' }).message === 'contract-2026-11',
+    'auto-grow: explicit zwsp is not added twice');
+
+  // A cover with no word gaps has nothing to insert into.
+  const nogaps = SPAB.encode('word', 'acme-42', Object.assign({ autoGrow: true }, P));
+  ok(typeof nogaps.text === 'string', 'auto-grow: a cover with no gaps does not throw');
+
+  // rlnc sizes by packets rather than frame bits.
+  const rp = { classes: ['ws', 'apos', 'hyphen'], ecc: 'rlnc', autoGrow: true };
+  const rg = SPAB.encode(SHORT, 'contract-2026-11', rp);
+  ok(SPAB.decode(rg.text, rp).message === 'contract-2026-11', 'auto-grow: rlnc grows and round-trips');
+
+  // Zero-width carriers are found on decode even when the caller did not ask.
+  ok(SPAB.decode(grown.text, { classes: ['ws'], ecc: 'repetition' }).message === 'contract-2026-11',
+    'auto-grow: decode detects zero-width carriers the caller did not list');
+  ok(SPAB.decode(LONG, { classes: ['ws'], ecc: 'repetition' }).message === null,
+    'auto-grow: text with no zero-width characters is unaffected');
+})();
+
+// -- frame scanner rejects spurious MAGIC bytes --
+//
+// The scanner walks every byte-aligned offset looking for [MAGIC][len][...][crc].
+// Real streams contain 0xA5 by coincidence, so both rejection paths matter: a
+// length that cannot fit, and a length that fits but whose CRC disagrees. The
+// carrier stream is built byte-exactly here rather than hoping damage produces
+// the right accident: 16 whitespace sites pack into one 32-bit block, digits
+// LSB-first base-4, so any four bytes can be written on demand.
+(function () {
+  const WS = SPAB.SPACE_MAP;
+  function textForBytes(quads) {
+    let out = 'w';
+    quads.forEach(function (q) {
+      const v = ((q[0] << 24) | (q[1] << 16) | (q[2] << 8) | q[3]) >>> 0;
+      for (let sIdx = 0; sIdx < 16; sIdx++) out += WS[(v >>> (2 * sIdx)) & 3] + 'w';
+    });
+    return out;
+  }
+  // block 1: MAGIC then len 0        -> rejected on length
+  // block 2: MAGIC, len 2, bad CRC   -> rejected on CRC
+  // block 3: filler so block 2 clears the bounds check and reaches the CRC test
+  const text = textForBytes([[0xA5, 0x00, 0x11, 0x22], [0xA5, 0x02, 0x33, 0x44], [0x00, 0x11, 0x22, 0x33]]);
+  const params = { classes: ['ws'], ecc: 'repetition' };
+  const res = SPAB.decode(text, params);
+  ok(res.message === null, 'scanner: spurious MAGIC with bad length/CRC yields no message');
+  ok(res.metadata.crcOk !== true, 'scanner: spurious MAGIC does not report a valid CRC');
+})();
+
 // -- browser-global branch of the IIFE wrapper (root = window) --
 (function () {
   const path = require('path');

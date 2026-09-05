@@ -7,6 +7,64 @@ the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
 
+### Added
+- **`autoGrow` (opt-in) and `redundancy`, for payloads a passage cannot hold.** Substitution carriers
+  are bounded by the text, so a long secret in a short passage used to encode one truncated copy that
+  decoded to nothing. `autoGrow: true` enables the zero-width carrier and raises its density until the
+  payload fits, aiming for `redundancy` copies (default 3 — growing to a single copy would trade a
+  broken mark for a fragile one). Decoding needs no flag: zero-width characters are self-evident, so
+  `decode()` reads that channel whenever the text contains them.
+
+  It is opt-in at the API, on by default in the front-page demo (so it just works whatever a visitor
+  types, with the growth reported in the result), and exposed as a toggle in the Playground. Stuffing
+  a large payload into a small passage is allowed — the same trade StegCloak makes — but a short
+  paragraph carrying hundreds of zero-width characters is trivially visible in a hex dump, so the
+  docs say plainly that it is allowed and not recommended.
+- **`tests/fuzz.test.js` asserted the wrong contract.** It inferred length preservation from the
+  requested `params.classes`, but that is a property of what the encoder *did*, not what was asked
+  for — so any encode that legitimately added an insert carrier was reported as a failure. The
+  invariants are now: visible length is never changed (universal), the visible text is identical
+  when only insert carriers ran, and byte length is preserved only when `metadata.classes` shows no
+  insert carrier was used. `autoGrow` and `redundancy` joined the permutation space.
+- **Word-boundary detection now skips zero-width characters.** Inserting a zero-width carrier after a
+  space stopped that space being seen as an inter-word gap, silently destroying the whitespace
+  channel underneath it (measured: 10 sites before, 0 after). Invisible characters must not change
+  what counts as a word boundary; the two carriers now coexist.
+
+### Fixed
+- **`zwsp.embed` recomputed its anchors instead of using the ones encode planned against** — a
+  latent bug, present before this release. Substitution carriers run first, and `wsdense` swaps
+  spaces for variants outside the whitespace class's own set, so the anchors found afterwards were
+  fewer than the digit stream had been sized for. The stream was silently truncated: unkeyed
+  decoding partly tolerated it, keyed decoding could not, because the descramble permutation depends
+  on the digit count. `classes: ['wsdense','zwsp']` with a key never round-tripped. Substitution is
+  one-for-one, so the cover's positions stay valid and are now passed through.
+- **The decoder now resynchronises after an edit that adds or removes a carrier site.** Deleting a
+  word usually collapses two gaps into one, removing a site and shifting the whole symbol stream;
+  blocks are cut from that stream by index, so every block after the edit decoded to noise. Adding
+  redundancy never helped because every copy shifted together — measured identically broken at 1x,
+  2x, 4x and 11x. The packets were never destroyed, only mislocated: `parsePackets` read fixed
+  32-bit slots from offset 0 and `foldParse` assumed the frame began at bit 0.
+
+  Decoding now re-cuts the block grid at each phase (up to 32, the largest block spab produces).
+  RLNC pools packets from every phase, and repetition falls back to scanning for one intact
+  self-contained frame when majority folding fails — folding otherwise averages intact copies
+  together with shifted noise. Phase 0 is tried first, so undamaged input decodes exactly as
+  before. Windows stay 32-bit aligned: scanning every bit offset instead surfaced ~8 chance CRC8
+  hits per document, and one false packet poisons the RLNC solve. Unmarked text still yields
+  nothing. Resync is disabled when `params.key` is set, since the keyed interleave spans the whole
+  stream and cannot be undone on a shifted one.
+
+  Measured on the research harness (same seeded corpus, 600 docs): cut/paste at 75% kept 2% -> 17%,
+  at 50% kept 0% -> 6%; word deletion at p=0.05 3% -> 6%; word insertion 3% -> 7%. Recovery still
+  requires spare capacity — a passage holding exactly one copy has nothing to fall back on, which
+  is why the front-page demo sample is now long enough for three.
+- **`tests/coverage.js` reported covered code as uncovered.** V8 emits a coarse zero-count range in
+  a process where a region was skipped and finer nested ranges where parts of it ran, so the same
+  code produced different `[start,end)` keys per test file and the two could never cancel. A coarse
+  zero-range from one file therefore outvoted another file that executed every statement inside it.
+  Coverage is now resolved per source offset across processes. This was blocking a legitimate 100%.
+
 ### Changed
 - **npm publishing uses OIDC trusted publishing — no token, no secret.** `publish.yml` declares
   `id-token: write`, and npm verifies that identity against the trusted publisher registered on the

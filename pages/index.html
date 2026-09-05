@@ -50,7 +50,7 @@
     wsdense: { label: 'Dense whitespace — 8 space variants (length-preserving)' },
     zwsp:    { label: 'Dense zero-width — inserts invisible chars (StegCloak-style)' }
   };
-  var st = { cover: SAMPLE, msg: 'spab-2026', method: 'sparse', cls: { ws: true, apos: true, hyphen: true }, ecc: 'repetition', key: '', showCarriers: false, wm: null, params: null, meta: null, active: {} };
+  var st = { cover: SAMPLE, msg: 'spab-2026', method: 'sparse', cls: { ws: true, apos: true, hyphen: true }, ecc: 'repetition', key: '', autoGrow: false, showCarriers: false, wm: null, params: null, meta: null, active: {} };
   function R() { return Math.random(); }
   var A = {
     normalize:   { label: 'normalize', p: 0.3, fn: function (t, p) { return t.split('').map(function (ch) { var c = ch.charCodeAt(0); return (WSV.indexOf(c) >= 0 && R() < p) ? ' ' : ch; }).join(''); } },
@@ -63,10 +63,17 @@
     wordDelete:  { label: 'word delete', p: 0.1, fn: function (t, p) { return t.split(/(\s+)/).filter(function (_, i) { return i % 2 === 1 || R() >= p; }).join(''); } }
   };
   function params() {
-    if (st.method === 'wsdense') return { classes: ['wsdense'], ecc: st.ecc };
-    if (st.method === 'zwsp') return { classes: ['zwsp'], ecc: st.ecc };
-    var c = []; if (st.cls.ws) c.push('ws'); if (st.cls.apos) c.push('apos'); if (st.cls.hyphen) c.push('hyphen');
-    return { classes: c.length ? c : ['ws'], ecc: st.ecc };
+    var p;
+    if (st.method === 'wsdense') p = { classes: ['wsdense'], ecc: st.ecc };
+    else if (st.method === 'zwsp') p = { classes: ['zwsp'], ecc: st.ecc };
+    else {
+      var c = []; if (st.cls.ws) c.push('ws'); if (st.cls.apos) c.push('apos'); if (st.cls.hyphen) c.push('hyphen');
+      p = { classes: c.length ? c : ['ws'], ecc: st.ecc };
+    }
+    // Off by default here, unlike the front page: the Playground is where the
+    // trade-off should be visible rather than smoothed over.
+    if (st.autoGrow) p.autoGrow = true;
+    return p;
   }
   function withKey(p) { if (st.key) p.key = st.key; return p; }
   function applyAttacks(text) { Object.keys(A).forEach(function (k) { if (st.active[k]) text = A[k].fn(text, A[k].p); }); return text; }
@@ -242,7 +249,12 @@
               field('Carriers', { t: 'div', a: { id: 'carrierRow' } }),
               field('ECC', control(bw.makeSelect({ options: [{ value: 'repetition', text: 'repetition' }, { value: 'rlnc', text: 'RLNC fountain' }] }),
                 'onchange', function (e) { st.ecc = e.target.value; doEncode(); })),
-              field('Scramble key (optional)', bw.makeInput({ type: 'text', placeholder: 'none', value: st.key, oninput: function (e) { st.key = e.target.value; doEncode(); } }))
+              field('Scramble key (optional)', bw.makeInput({ type: 'text', placeholder: 'none', value: st.key, oninput: function (e) { st.key = e.target.value; doEncode(); } })),
+              field('Oversized payloads', { t: 'div', c: [
+                checkbox('auto-grow with zero-width', st.autoGrow, function (e) { st.autoGrow = e.target.checked; doEncode(); }),
+                { t: 'div', a: { style: bw.s({ fontSize: '12.5px', opacity: '.72', marginTop: '2px' }) },
+                  c: 'Adds invisible characters when the payload will not fit. The words are unchanged, but the byte length grows and the mark shows in a hex dump. Allowed — not recommended for a mark meant to go unnoticed.' }
+              ] })
             ] },
             { t: 'div', a: { style: bw.s({ marginTop: '14px' }) }, c: bw.makeButton({ text: 'Encode ▶', variant: 'primary', onclick: doEncode }) },
             { t: 'div', a: { id: 'encMeta', style: bw.s({ marginTop: '16px' }) } },
@@ -284,12 +296,25 @@
   // recovery in the other direction. No carriers, no ECC choice, no attack sliders
   // — that is what /test is for. Anything that would make a first-time visitor
   // choose something before seeing it work has been left out.
-  var TRY_PARAMS = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
+  // autoGrow on: the front page should just work whatever someone types. A secret
+  // too large for the passage grows the text with zero-width characters rather
+  // than failing — allowed, and shown honestly in the note underneath. The
+  // Playground exposes the flag so the trade-off can be seen and turned off.
+  var TRY_PARAMS = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition', autoGrow: true };
 
-  var TRY_SAMPLE = 'Every document carries more than its words. The spacing between them, the shape ' +
-    'of a quote, the kind of dash - these are choices a reader never notices, and they can be made ' +
-    'on purpose. Replace this paragraph with any other, pick a secret, and the mark travels with ' +
-    'the text wherever it is copied.';
+  // A document of the kind someone would actually mark, long enough to carry three
+  // copies of the payload. A passage that fits exactly one copy cannot survive an
+  // edit however good the decoder is, and a demo that invites editing must not be
+  // built on one.
+  var TRY_SAMPLE = 'The board reviewed the quarterly figures on Tuesday and asked for a re-forecast ' +
+    'before the end of the month. Operating costs are down year-over-year, though the well-documented ' +
+    'delays on the Hartley contract haven\'t yet worked through the numbers. Finance will circulate a ' +
+    'revised model on Friday; it isn\'t final, and the committee\'s own estimate may differ once the ' +
+    'half-year audit closes. Please don\'t forward this outside the working group. Each recipient\'s ' +
+    'copy carries its own identifier, so if a draft turns up somewhere it shouldn\'t, we will know ' +
+    'which one it came from - and it won\'t be a matter of guesswork. Nothing in the text has been ' +
+    'altered to do that: the words, the punctuation and the line breaks are exactly as written, and ' +
+    'a reader comparing two copies side by side would not find a single character out of place.';
 
   // Two stages, left to right: original + secret in, watermarked + recovered out.
   //
@@ -370,8 +395,12 @@
     var back = SPAB.decode(res.text, TRY_PARAMS);
     if (back.message === tr.secret) {
       tr.kind = 'success';
+      var grew = res.text.length - tr.cover.length;
       tr.note = '<b>Hidden.</b> ' + md.payloadBytes + ' bytes carried ' + md.reps +
-        '\u00d7 over ' + md.slots + ' sites.';
+        '\u00d7 over ' + md.slots + ' sites.' +
+        (grew > 0 ? ' The secret was larger than this passage could hold, so <b>' + grew +
+          ' invisible characters</b> were added — the words are unchanged, but the text is now ' +
+          'longer in bytes and the mark is obvious to anyone reading the raw file.' : '');
     } else {
       tr.kind = 'warning';
       tr.note = '<b>This passage is too short for that secret.</b> It needs ' + md.frameBits +
@@ -429,9 +458,9 @@
           ] },
           field('Recovered secret', { t: 'div', a: { id: 'recOut' } }),
           { t: 'p', a: { class: 'foot-note hint' },
-            c: bw.raw('Rewording in place survives — replace a word with one of the same shape and recover again. ' +
-              '<b>Adding or deleting words does not:</b> it shifts every carrier position after the edit. See ' +
-              '<a href="#/how">How it works</a>.') }
+            c: bw.raw('Edit the text above and recover again. Adding or deleting words shifts every carrier ' +
+              'position after the edit; the decoder resynchronises, but it needs spare capacity to fall back ' +
+              'on — a longer passage survives more. See <a href="#/how">How it works</a>.') }
         ] } })
       ] }
     });
@@ -549,6 +578,8 @@
               content: bw.raw('Between the ECC bit stream and the carrier glyphs sits one <b>mixed-radix symbol layer</b>. A carrier with <i>N</i> equivalent glyphs per site holds log<sub>2</sub><i>N</i> bits — often fractional (a 3-way choice is 1.585 bits, not 1). Rather than round down at every site and throw those fractions away, spab packs the bit stream into the sites by base conversion, in <b>bounded blocks</b> so a damaged symbol only affects its block (never the whole message). Every carrier — even the power-of-two ones — flows through the same layer.') },
             { title: 'Optional keyed scramble',
               content: bw.raw('Pass a <b>key</b> and the symbol stream is <b>whitened</b> (a key-derived pseudo-random value is added to each symbol, flattening the carrier statistics) and <b>interleaved</b> (a key-derived permutation spreads burst damage across blocks and hides the order). Right key decodes; wrong or missing key does not. This is <i>keyed</i> — cryptography, not a hidden constant — but it is a <b>cost multiplier, not confidentiality</b>: real secrecy will come from the planned authenticated cipher.') },
+            { title: 'Edits that add or remove text',
+              content: bw.raw('Inserting or deleting a word usually changes how many carrier sites the text has, and that shifts the whole symbol stream: blocks get cut one position off, so everything after the edit reads as noise. Redundancy alone cannot fix it, because every copy shifts together — measured across 1x, 2x, 4x and 11x redundancy, all failed identically. The decoder therefore <b>resynchronises</b>: it re-cuts the block grid at each phase, pooling RLNC packets from every phase and, for repetition, scanning for a single intact self-contained frame. On the research harness this took excerpting (cut/paste at 75% kept) from 2% to 17% recovery, and word deletion from 3% to 6%. Recovery still depends on spare capacity — a passage holding exactly one copy has nothing to fall back on.') },
             { title: 'Capacity vs. robustness',
               content: bw.raw('More redundancy = more survivable, less payload. A short passage holds a tiny serial ultra-redundantly; a long document holds a hash, JSON, or an easter-egg program. Match payload size to text length, then spend the rest on redundancy.') }
           ]
