@@ -5,6 +5,41 @@ work we study and compare against, an honest map of the main approaches and thei
 discussion of a real tension for an open-source scheme: publishing the method also publishes the
 attack.
 
+## Capability matrix — where spab sits, and what it is missing
+
+Dimensions that matter for a text watermark, across the families studied below.
+**Sourced from each project's own documentation, not from running them** — the only
+numbers we have measured ourselves are in `r_and_d/reports/findings.md`, produced by
+`npm run compare` against reimplementations of each *technique*.
+
+| | placement | ECC / erasure | integrity | compactness | typed payload | encrypted |
+|---|---|---|---|---|---|---|
+| **spab** | spread over every carrier site | repetition or RLNC fountain; resynchronises after insert/delete | magic + CRC8 frame; **never returns a wrong payload** | length-preserving (substitution); zero-width optional | ✗ *(gap)* | ✗ keyed scramble only *(gap)* |
+| StegCloak | single insertion point | none | HMAC | payload adds bytes; visible in hex | — | AES-256-GCM |
+| 330k unicode_steganography | spread across tokens | none | none | payload adds bytes | ✗ | ✗ |
+| snow-family whitespace | trailing whitespace | none | none | length-changing (appends) | ✗ | optional (ICE) |
+| Markov / linguistic stego | word choice | n/a — output is generated text | n/a | generates text rather than marking it | ✗ | ✗ |
+| LLM generation-time (green-list, SynthID-Text) | token sampling at generation | statistical detection, not a payload | detection score, not a CRC | no payload to carry | n/a | n/a |
+
+Reading the row that matters: **spab's distinguishing properties are the frame CRC
+(it declines rather than guesses) and length-preserving substitution carriers that
+survive zero-width sanitisation.** Its distinguishing *gaps* are the two right-hand
+columns — no type field and no real encryption — both of which StegCloak has had for
+years. Those are tracked in `dev/roadmap.md` and are the honest answer to "what is
+missing".
+
+Three caveats before this table is used to argue anything:
+
+1. **Different goals.** LLM generation-time watermarking does not carry a payload at
+   all; it makes generated text statistically detectable. It is in the table because
+   it is what "AI text watermarking" now usually means, not because it competes.
+2. **Capability is not robustness.** Having AES says nothing about surviving a paste
+   into a plain text field. Our measured comparison covers robustness; this table
+   covers features.
+3. **Not re-verified.** These entries come from project documentation as recorded
+   below and have not been re-checked against current releases. Anything load-bearing
+   should be confirmed before it is published.
+
 ## Reference implementations & tools (shout-outs)
 
 We stand on a lot of prior work. In rough family order:

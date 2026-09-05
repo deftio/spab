@@ -7,6 +7,45 @@ the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
 
+### Added
+- **11 real-world corruption models** in `r_and_d/corruptions.js`: pasting into a plain text field,
+  PDF/rendered-page extraction, tokenise-and-rejoin, email quoting, editor trailing-space trim,
+  per-word typos, terminology find-and-replace, JSON round trip (a control that must always
+  survive), sentence reordering, markdown stripping, and concatenation into a larger document.
+  These are what a mark actually meets; the existing models are synthetic damage.
+- **`r_and_d/samples.js`** — ten fixed text samples chosen so each stresses something different:
+  punctuation-rich and punctuation-poor prose, chat-style short lines, markdown, code with
+  structural indentation, a long passage, a passage too small to encode, text with no inter-word
+  spaces at all (CJK-like), and text that already contains unicode spaces and curly quotes.
+- **`npm run characterize`** — a deterministic sweep (10 samples x 7 payload sizes x 4 carrier sets
+  x 2 ECC modes x 23 models, ~3,465 rows) reporting recovery grouped the way design has to reason
+  about it. It reports **paired** comparisons alongside the raw ones, because the raw tables are
+  confounded: an arm with more capacity encodes in a different population than one without. On this
+  data the paired view reverses the ECC conclusion — raw says RLNC 80% vs repetition 70%, paired
+  over the 900 cells both could encode says repetition 88% vs RLNC 80%.
+- **The deterministic suite now covers the real-world channels** as a classification rather than a
+  pass mark: lossless channels must keep the mark, destructive ones may lose it but must never
+  return a wrong payload.
+- **`npm run compare` — spab against reference models of the other approaches.** `r_and_d/baselines.js`
+  reimplements each *technique* (point insertion as StegCloak shapes it, spread insertion as 330k
+  does, naive whitespace substitution as the snow family does) so the comparison isolates two design
+  decisions — where the payload sits and whether there is error correction — rather than benchmarking
+  anyone's library. Paired, like the characterization sweep.
+- **`r_and_d/reports/findings.md`** — a running log of what the harnesses actually show, with the
+  command to reproduce each number and superseded findings struck rather than deleted.
+- **A capability matrix in `r_and_d/docs/prior-art-and-tradeoffs.md`** across placement, ECC/erasure,
+  integrity, compactness, typed payloads and encryption, marked clearly as sourced from project
+  documentation rather than measured. It puts spab's two gaps in writing: no type field and no real
+  encryption, both of which StegCloak has had for years.
+- **Two measurement biases found and fixed.** The corruption suite only ever attacked the whitespace
+  channel, so zero-width schemes sailed through a suite that never touched them (`stripZw`, `zwNoise`
+  added); and `truncate` kept the head, which silently favours any scheme anchored at the start
+  (`truncTail`, `midExcerpt` added — point insertion's excerpt score fell from 83% to 36% once the
+  mirror cases existed). A robustness suite written around one design will flatter that design.
+- **Findings recorded in `dev/roadmap.md`** — redundancy (not length) is the variable that moves
+  recovery; the confusable channels never fit a payload alone in the whole sweep; excerpting and
+  word deletion remain the weakest survivable cases.
+
 ### Fixed
 - **`publish.yml` never ran.** It triggered on `release: published`, but `release-on-bump.yml`
   creates the Release with the default `GITHUB_TOKEN`, and GitHub does not fire workflows from
