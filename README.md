@@ -81,7 +81,10 @@ pages/          GitHub Pages site — pure HTML/JS/CSS (bitwrench.js), same info
 ## Design invariants
 
 - **Zero third-party dependencies**, in every language.
-- **Deterministic** at runtime (same input + params → same output, on every port).
+- **Deterministic** at runtime: same input and same *explicit* params give the same
+  output on every port. The one exception is encryption, which draws a fresh nonce
+  when `params.nonce` is not supplied — correct AEAD behaviour, and intentionally
+  nondeterministic.
 - **Classic DSP, not gen-AI** — modulation / demodulation / sync / FEC; parameters may be tuned
   offline but nothing learned runs at decode time.
 - **Portable wire format** validated by shared conformance test vectors across all ports.

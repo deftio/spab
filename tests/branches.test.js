@@ -30,6 +30,45 @@ ok(SPAB.getSlots(enc.text).length > 0, 'getSlots finds ws sites');
 const h = SPAB.histogram(enc.text);
 ok(h.total === h.counts.reduce(function (a, b) { return a + b; }, 0), 'histogram counts sum to total');
 
+// The sum-to-total check above is self-consistent by construction: a histogram that
+// counted nothing, counted the wrong characters, or ignored the variants entirely
+// would still pass it. These pin what the function is actually FOR — it is the
+// whitespace-histogram detector, the same statistic an adversary runs to decide
+// whether a passage has been marked, so it has to separate marked from unmarked.
+(function () {
+  // Exact bucket assignment, tied to SPACE_MAP order. Four inter-word gaps, one of
+  // each variant, so a reordering of SPACE_MAP or an off-by-one in `read` shows up
+  // as a wrong bucket rather than a still-valid-looking total.
+  const M = SPAB.SPACE_MAP;
+  const known = 'a' + M[0] + 'b' + M[1] + 'c' + M[2] + 'd' + M[3] + 'e';
+  const kh = SPAB.histogram(known);
+  ok(kh.total === 4, 'histogram counts every inter-word gap (got ' + kh.total + ')');
+  ok(kh.counts.join(',') === '1,1,1,1',
+    'each space variant lands in its own SPACE_MAP bucket (got ' + kh.counts.join(',') + ')');
+
+  // Unmarked prose is all U+0020: the whole point is that this is the null case.
+  const plain = 'the quick brown fox jumps over the lazy dog again now';
+  const ph = SPAB.histogram(plain);
+  ok(ph.total > 0 && ph.counts[0] === ph.total,
+    'unmarked text is entirely ordinary spaces (' + ph.counts.join(',') + ')');
+  ok(ph.counts.slice(1).every(function (c) { return c === 0; }),
+    'unmarked text uses no space variants at all');
+
+  // And a marked passage is visibly different in exactly that statistic. Without
+  // this, the detector could stop detecting and only the tautology would notice.
+  const marked = SPAB.histogram(enc.text);
+  ok(marked.counts.slice(1).reduce(function (a, b) { return a + b; }, 0) > 0,
+    'a marked passage puts sites in the variant buckets — the detector detects');
+  ok(marked.total === SPAB.getSlots(enc.text).length,
+    'histogram totals agree with getSlots — same sites, counted the same way');
+
+  // Only inter-word gaps are sites: leading, trailing and doubled spaces are not,
+  // so they must not inflate the total.
+  ok(SPAB.histogram('  ab  ').total === 0, 'leading and trailing spaces are not sites');
+  ok(SPAB.histogram('').total === 0 && SPAB.histogram('').counts.join(',') === '0,0,0,0',
+    'empty text yields an empty histogram');
+})();
+
 // -- CLASS_DEFS.ws.read on a non-space index -> 0 (the undefined branch) --
 ok(SPAB.CLASS_DEFS.ws.read('abc', 1) === 0, 'ws.read on non-space returns 0');
 

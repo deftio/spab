@@ -740,8 +740,118 @@ console.log('\n-- 12b. the build reports itself truthfully --');
   eq(SPAB.version().carriers.length, before, 'version() returns a fresh object each call, not shared state');
 })();
 
+// ============================================================ 12c. the soft layer
+console.log('\n-- 12c. sliding histogram detector and the soft layer --');
+
+(function () {
+  const prose = ('Every document carries more than its words. The spacing between them, the shape ' +
+    'of a quote, the kind of dash - these are choices a reader never notices. ').repeat(6);
+
+  // Channel estimation from the carrier histogram alone. An unmarked passage is all
+  // default glyphs, so it looks fully collapsed; marking spreads the mass; NFKC
+  // folds it all back and the estimate returns to where it started.
+  const clean = SPAB.detect(prose, { classes: ['ws'] }).ws;
+  const marked = SPAB.detect(SPAB.encode(prose, 'acme-42', { classes: ['ws'] }).text, { classes: ['ws'] }).ws;
+  const flat = SPAB.detect(SPAB.encode(prose, 'acme-42', { classes: ['ws'] }).text.normalize('NFKC'), { classes: ['ws'] }).ws;
+  ok(clean.collapse > 0.9, 'unmarked prose estimates as fully collapsed (' + clean.collapse + ')');
+  ok(marked.collapse < clean.collapse - 0.3, 'marking lowers the collapse estimate (' + marked.collapse + ')');
+  ok(flat.collapse > 0.9, 'NFKC returns the estimate to unmarked (' + flat.collapse + ')');
+  ok(marked.meanConfidence > clean.meanConfidence,
+    'a marked passage reads with higher mean site confidence (' + marked.meanConfidence + ' vs ' + clean.meanConfidence + ')');
+
+  // The likelihood field is a field: one entry per window position.
+  eq(marked.field.length, marked.sites - marked.window + 1, 'the field has one entry per window position');
+  ok(marked.field.every(f => f.counts.reduce((a, b) => a + b, 0) === marked.window),
+    'every window histogram sums to the window size');
+  ok(marked.field.some(f => f.marked > 0.5) && clean.field.every(f => f.marked < 0.2),
+    'the marked score separates a marked passage from an unmarked one');
+  // Explicit window size, and a window larger than the site count.
+  eq(SPAB.detect(prose, { classes: ['ws'], window: 8 }).ws.window, 8, 'the window size is caller-settable');
+  eq(SPAB.detect('a b', { classes: ['ws'], window: 500 }).ws.field.length, 0,
+    'a window wider than the document yields an empty field rather than throwing');
+  ok(SPAB.detect(prose).ws !== undefined, 'detect() with no params uses the default carriers');
+  eq(SPAB.detect('').ws.sites, 0, 'detect() on empty text reports no sites');
+
+  // Posteriors: a non-default observation is near-certain; the default is ambiguous
+  // in proportion to how much collapse the histogram implies.
+  const p1 = SPAB.soft.softDigit(2, 4, 0.5);
+  ok(p1[2] > 0.9, 'a non-default observation is read with high confidence');
+  const p0lo = SPAB.soft.softDigit(0, 4, 0.0), p0hi = SPAB.soft.softDigit(0, 4, 1.0);
+  eq(p0lo[0], 1, 'with no collapse, the default glyph is certain');
+  ok(Math.abs(p0hi[0] - 0.25) < 1e-9, 'with total collapse, the default glyph is uninformative');
+  ok(p0hi[0] < p0lo[0], 'more estimated collapse means less trust in a default glyph');
+  eq(SPAB.soft.estimateCollapse([], 4), 0, 'an empty stream estimates no collapse');
+  eq(SPAB.soft.estimateCollapse([0, 1, 2, 3], 4), 0, 'a uniform stream estimates no collapse');
+  ok(SPAB.soft.estimateCollapse([0, 0, 0, 0], 4) > 0.9, 'an all-default stream estimates near-total collapse');
+  eq(SPAB.soft.siteConfidence([0.1, 0.7, 0.1, 0.1]), 0.7, 'site confidence is the posterior maximum');
+  // A window of 0 means "choose one": the field falls back to min(32, sites).
+  eq(SPAB.soft.likelihoodField('a b', 'ws', 0).window, 1, 'a zero window falls back to the site count');
+  eq(SPAB.soft.likelihoodField('', 'ws', 4).field.length, 0, 'no sites yields an empty field');
+  eq(SPAB.soft.likelihoodField('a b', 'ws', 9).field.length, 0, 'a window wider than the sites yields an empty field');
+})();
+
+// Emoji joiners are not payload. U+200D is both a zwsp carrier variant and the emoji
+// ZWJ, and reading a cover's own joiners as data desynchronises everything after
+// them — caught by the emoji document in tests/corpus.js.
+(function () {
+  const ZWJ = '\u200D';
+  const family = '\u{1F468}' + ZWJ + '\u{1F469}' + ZWJ + '\u{1F467}';
+  eq(SPAB.CLASS_DEFS.zwsp.extract('a ' + family + ' b'), [], 'an emoji ZWJ sequence yields no carrier digits');
+  eq(SPAB.CLASS_DEFS.zwsp.extract('a' + ZWJ + 'b'), [2], 'a ZWJ between ordinary letters IS carrier data');
+  // Every pictographic category the joiner test recognises.
+  const CATS = [
+    ['emoji block', '\u{1F600}'],
+    ['dingbat', '\u2714'],
+    ['regional indicator', '\u{1F1EC}'],
+    ['tag character', '\u{E0067}'],
+    ['variation selector', '\uFE0F']
+  ];
+  for (const [name, ch] of CATS) {
+    eq(SPAB.CLASS_DEFS.zwsp.extract(ch + ZWJ + ch), [], 'a joiner between ' + name + ' pairs is not payload');
+  }
+  // A joiner at the very start or end has no neighbour on one side, so it is data.
+  eq(SPAB.CLASS_DEFS.zwsp.extract(ZWJ + '\u{1F600}'), [2], 'a leading joiner has no left neighbour and is payload');
+  eq(SPAB.CLASS_DEFS.zwsp.extract('\u{1F600}' + ZWJ), [2], 'a trailing joiner has no right neighbour and is payload');
+  // The other three zero-width variants are always payload — none is an emoji joiner.
+  eq(SPAB.CLASS_DEFS.zwsp.extract('\u{1F600}\u200B\u{1F600}'), [0], 'U+200B between emoji is still payload');
+  // And the round trip survives an emoji-heavy cover.
+  const cover = ('A release note with a rocket \u{1F680} and a family ' + family +
+    ' and a flag \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F} in the middle of it. ').repeat(6);
+  const e = SPAB.encode(cover, 'emoji-safe', { classes: ['zwsp'] });
+  eq(SPAB.decode(e.text, { classes: ['zwsp'] }).message, 'emoji-safe', 'an emoji-heavy cover round-trips through zwsp');
+  ok(e.text.indexOf(family) >= 0, 'and the emoji clusters are left intact');
+})();
+
 // ============================================================ 13. the spec matches
 console.log('\n-- 13. the specification matches the implementation --');
+
+// The source header is normative documentation for anyone porting spab, and it went
+// stale once already: through 0.5.0 it still described the 0.1.x codec — "magic
+// 0xA5", a one-byte length, whitespace-only defaults — none of which had been true
+// for two wire formats. A porting agent reading it would have faithfully implemented
+// the wrong thing. So the header is checked against the descriptor here rather than
+// trusted. (Review dev/spab_0.5_review.md 12.7.)
+(function () {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'spab.js'), 'utf8');
+  const header = src.slice(0, src.indexOf('(function (root) {'));
+  const f = SPAB.algorithm.frame;
+  ok(header.indexOf('wire format v2') > 0 || header.indexOf('Wire format v2') > 0,
+    'the source header names the current wire format');
+  ok(header.indexOf('magic') < 0 || header.indexOf('no magic number') > 0,
+    'the source header does not claim a magic byte the format no longer has');
+  ok(header.indexOf('0xA5') < 0, 'the retired magic constant is gone from the header');
+  ok(header.indexOf('whitespace-only') < 0, 'the header does not claim the old whitespace-only default');
+  for (const cls of SPAB.version().defaultCarriers) {
+    ok(header.indexOf(cls) > 0, 'the header names default carrier ' + cls);
+  }
+  for (const ecc of SPAB.version().ecc) {
+    ok(header.toLowerCase().indexOf(ecc) > 0, 'the header names ecc mode ' + ecc);
+  }
+  ok(header.indexOf('17-bit') > 0, 'the header states the fixed header width the descriptor does');
+  ok(header.indexOf('nonce') > 0, 'the header states the determinism exception for encryption');
+  ok(header.indexOf('dev/wire-format.md') > 0, 'the header points at the normative spec');
+  eq(f.version, 2, 'and the descriptor agrees');
+})();
 
 const SPEC = fs.readFileSync(path.join(__dirname, '..', 'dev', 'wire-format.md'), 'utf8');
 ok(/version\s*:\s*3/.test(SPEC) && /type\s*:\s*5/.test(SPEC) && /comp\s*:\s*3/.test(SPEC) &&

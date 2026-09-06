@@ -14,19 +14,23 @@ numbers we have measured ourselves are in `r_and_d/reports/findings.md`, produce
 
 | | placement | ECC / erasure | integrity | compactness | typed payload | encrypted |
 |---|---|---|---|---|---|---|
-| **spab** | spread over every carrier site | repetition or RLNC fountain; resynchronises after insert/delete | magic + CRC8 frame; **never returns a wrong payload** | length-preserving (substitution); zero-width optional | ✗ *(gap)* | ✗ keyed scramble only *(gap)* |
+| **spab** | spread over every carrier site | repetition or RLNC fountain; resynchronises after insert/delete | wire-v2 packet, checksum 8–256 bits; **never returns a wrong payload** | length-preserving (substitution); zero-width optional | ✓ string/json/bytes/ser8/uuid/sha256 | ✓ AES-256-GCM |
 | StegCloak | single insertion point | none | HMAC | payload adds bytes; visible in hex | — | AES-256-GCM |
 | 330k unicode_steganography | spread across tokens | none | none | payload adds bytes | ✗ | ✗ |
 | snow-family whitespace | trailing whitespace | none | none | length-changing (appends) | ✗ | optional (ICE) |
 | Markov / linguistic stego | word choice | n/a — output is generated text | n/a | generates text rather than marking it | ✗ | ✗ |
 | LLM generation-time (green-list, SynthID-Text) | token sampling at generation | statistical detection, not a payload | detection score, not a CRC | no payload to carry | n/a | n/a |
 
-Reading the row that matters: **spab's distinguishing properties are the frame CRC
-(it declines rather than guesses) and length-preserving substitution carriers that
-survive zero-width sanitisation.** Its distinguishing *gaps* are the two right-hand
-columns — no type field and no real encryption — both of which StegCloak has had for
-years. Those are tracked in `dev/roadmap.md` and are the honest answer to "what is
-missing".
+*Version-stamped: spab 0.5.1, wire format v2, default carriers ws+apos+hyphen. The
+two right-hand columns were both ✗ through 0.4.x and closed in 0.5.0; a capability
+table that is not version-stamped goes stale silently, which this one did.*
+
+Reading the row that matters: **spab's distinguishing properties are the packet
+checksum (it declines rather than guesses), length-preserving substitution carriers
+that survive zero-width sanitisation, and resynchronisation after insert/delete.**
+The typed-payload and encryption gaps that stood here through 0.4.x are closed.
+What remains missing is tracked in `dev/roadmap.md` — chiefly the sliding histogram
+detector, and a compact binary encoding for JSON payloads.
 
 Three caveats before this table is used to argue anything:
 

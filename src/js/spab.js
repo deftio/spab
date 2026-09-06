@@ -1,22 +1,45 @@
 /*
  * spab.js — text watermark codec (reference implementation)
  *
- * Pluggable symbol library over a mixed-bit slot stream:
- *   - Carrier CLASSES, each contributing "sites" in the text that carry bits:
- *       ws     — inter-word space, 4 whitespace variants (2 bits/site)   [default]
- *       apos   — apostrophe/right-single-quote  U+0027 <-> U+2019 (1 bit) [opt-in]
- *       hyphen — hyphen-minus/Unicode hyphen     U+002D <-> U+2010 (1 bit) [opt-in]
- *     ('punct' is shorthand for apos+hyphen.)
- *   - All enabled classes' sites are merged in text order into one bit stream.
- *   - Framing: [magic 0xA5][len][content...][crc8].
- *   - ECC: repetition + majority vote across the whole stream.
+ * Hides a payload in choices a reader never notices: which of several visually
+ * equivalent whitespace characters sits between two words, whether an apostrophe is
+ * straight or curly, whether a hyphen is U+002D or U+2010.
  *
- * Default params ({}) = whitespace-only, identical to the 0.1.x baseline. Enable
- * confusables with params.classes:['ws','punct'] (or profile:'ws+punct'). The
- * confusable classes survive whitespace-only attacks (normalize/reflow/regex),
- * giving a second, strip-resistant channel. encode/decode must use the same classes.
+ * Carrier classes, each contributing "sites" that carry symbols:
+ *     ws      — inter-word space, 4 whitespace variants   (2 bits/site)  [default]
+ *     apos    — U+0027 <-> U+2019                         (1 bit/site)   [default]
+ *     hyphen  — U+002D <-> U+2010                         (1 bit/site)   [default]
+ *     wsdense — 8 whitespace variants                     (3 bits/site)  [opt-in]
+ *     zwsp    — INSERTS zero-width characters             (2 bits/char)  [opt-in]
+ *   ('punct' is shorthand for apos+hyphen.)
+ *
+ * Classes are INDEPENDENT PARALLEL CHANNELS, each carrying the whole payload, so an
+ * edit that destroys one can leave another intact. Default = ws + apos + hyphen,
+ * chosen because they fail differently: whitespace dies to NFKC normalization, the
+ * confusables survive it.
+ *
+ * Payload path:
+ *   message -> type -> compress? -> encrypt? -> packet -> ECC -> symbols -> text
+ *
+ * Wire format v2 (normative spec in dev/wire-format.md):
+ *   [version:3 | type:5 | comp:3 | enc:3 | cksum:3]  17-bit fixed header
+ *   [extension bytes, grouped, in field order]       only for escaped fields
+ *   [len varint]                                     only when not implied by type
+ *   [checksum, 8 << cksum bits]                      BEFORE the content, deliberately
+ *   [content][pad to a byte boundary]
+ * There is no magic number: the header's own plausibility plus the checksum is the
+ * discriminator. Packets written by 0.4.x are NOT read by this version.
+ *
+ * ECC: per-channel repetition + per-bit majority vote (default), or a GF(256)
+ * systematic RLNC fountain (ecc:'rlnc') whose self-checking 32-bit packets pool
+ * across channels.
+ *
+ * Determinism: same input and same explicit params give the same output on every
+ * port — EXCEPT that encryption draws a fresh 12-byte nonce when `params.nonce` is
+ * not supplied, which is correct AEAD behaviour and intentionally nondeterministic.
  *
  * Works as a browser global (window.SPAB) and via CommonJS (module.exports).
+ * Zero dependencies, including for SHA-256, AES-256-GCM and compression.
  */
 (function (root) {
   'use strict';
@@ -27,6 +50,28 @@
   var WS_SET = {};
   SPACE_MAP.forEach(function (c, i) { WS_SET[c] = i; });
 
+  // Is the code point at `at` pictographic — emoji, symbol, regional indicator, or a
+  // variation selector/tag that belongs to one? Used only to tell an emoji joiner
+  // apart from a zero-width carrier. Works on UTF-16 code units, so a low surrogate
+  // is checked by pairing it with the high surrogate before it.
+  function isPictographic(text, at) {
+    if (at < 0 || at >= text.length) return false;
+    var c = text.charCodeAt(at);
+    if (c >= 0xDC00 && c <= 0xDFFF && at > 0) {          // low surrogate: rebuild the pair
+      var hi = text.charCodeAt(at - 1);
+      if (hi >= 0xD800 && hi <= 0xDBFF) c = (hi - 0xD800) * 0x400 + (c - 0xDC00) + 0x10000;
+    } else if (c >= 0xD800 && c <= 0xDBFF && at + 1 < text.length) {
+      var lo = text.charCodeAt(at + 1);
+      if (lo >= 0xDC00 && lo <= 0xDFFF) c = (c - 0xD800) * 0x400 + (lo - 0xDC00) + 0x10000;
+    }
+    if (c === 0xFE0F || c === 0xFE0E) return true;        // variation selectors
+    // Regional indicators (U+1F1E6..U+1F1FF) need no line of their own: they sit
+    // inside the emoji block range below.
+    if (c >= 0x1F000 && c <= 0x1FAFF) return true;        // emoji blocks
+    if (c >= 0x2600 && c <= 0x27BF) return true;          // misc symbols and dingbats
+    if (c >= 0xE0020 && c <= 0xE007F) return true;        // tag characters (flag sequences)
+    return false;
+  }
   function isWordChar(ch) { return !!ch && !/\s/.test(ch) && !(ch in WS_SET) && !(ch in ZW_SET); }
   // Neighbours, skipping zero-width characters. They are invisible, so they must
   // not change what counts as a word boundary: without this, inserting a
@@ -132,10 +177,28 @@
         for (var i = 0; i < text.length; i++) { outp += text[i]; if (run[i] !== undefined) outp += run[i]; }
         return outp;
       },
-      // recover the digit stream (every zero-width char, in order).
+      // recover the digit stream (every zero-width char, in order) — except the ones
+      // that were already in the cover doing a job.
+      //
+      // U+200D is both a carrier variant and the EMOJI ZERO WIDTH JOINER. A family
+      // emoji is man-ZWJ-woman-ZWJ-girl, and a flag is a tag sequence; read
+      // naively, those joiners come back as payload digits. Measured on the emoji
+      // document in tests/corpus.js: two spurious digits extracted from an UNMARKED
+      // cover, which shifts every real digit after them and desynchronises the
+      // stream. The mark still decoded there because the ECC absorbed two errors,
+      // but that is luck, not design — a document with many emoji would not be.
+      //
+      // A joiner sitting between two pictographic characters is doing emoji work,
+      // not carrying data, so it is skipped. The encoder never inserts there anyway:
+      // anchors are inter-word gaps, and the inside of an emoji cluster is not one.
       extract: function (text) {
         var digits = [];
-        for (var i = 0; i < text.length; i++) { var v = ZW_SET[text[i]]; if (v !== undefined) digits.push(v); }
+        for (var i = 0; i < text.length; i++) {
+          var v = ZW_SET[text[i]];
+          if (v === undefined) continue;
+          if (text.charCodeAt(i) === 0x200D && isPictographic(text, i - 1) && isPictographic(text, i + 1)) continue;
+          digits.push(v);
+        }
         return digits;
       }
     }
@@ -199,7 +262,9 @@
   // scramble interleaves across the whole stream, so a shifted stream cannot be
   // descrambled and sweeping it would produce noise.
   var MAX_PHASE = 32;   // largest block length spab produces (radix-2 packs 32 sites)
-  function phaseCount(key, n) { return key ? 1 : Math.min(MAX_PHASE, n); }
+  // Keyed marks sweep phases too, now that the keyed permutation is block-local and
+  // no longer a function of the carrier count.
+  function phaseCount(key, n) { return Math.min(MAX_PHASE, n); }
   function phaseBits(digits, ph, def, key, id, maxSites) {
     var d = ph ? digits.slice(ph) : digits;
     if (key) d = descramble(d, def.radix, keySeed(key, id));
@@ -208,7 +273,8 @@
 
   // ---------- GF(256) + systematic RLNC fountain (ecc:'rlnc') ----------
   // Rateless erasure code over GF(2^8). Packets are self-checking (CRC) and
-  // self-locating (ESI), spread across all carrier channels; any K clean packets
+  // self-locating (ESI), spread across all carrier channels; any K LINEARLY
+  // INDEPENDENT packets
   // reconstruct the payload, so surviving carriers cover for killed ones.
   var GF_EXP = new Uint8Array(512), GF_LOG = new Uint8Array(256);
   (function () { var x = 1; for (var i = 0; i < 255; i++) { GF_EXP[i] = x; GF_LOG[x] = i; x = (x << 1) ^ (x & 0x80 ? 0x11d : 0); x &= 0xff; } for (i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255]; })();
@@ -1054,21 +1120,58 @@
   // obscurity; and it is a COST MULTIPLIER, not confidentiality — that awaits the planned AEAD.
   // Identity when no key, so keyless behavior (and existing vectors) is unchanged.
   function keySeed(key, id) { var s = String(key) + '|' + id, h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  // The keyed layer used to build ONE Fisher-Yates permutation over all `n` digits.
+  // That made the permutation a function of the carrier count, so any edit that
+  // added or removed a site — appending a sentence, quoting an excerpt — changed
+  // every position at once and the stream descrambled to noise. Resynchronisation
+  // had to be switched off for keyed marks as a result, and the cost was measured:
+  // under structural damage, keyed recovery was 27% against unkeyed's 97%, and the
+  // correlation with carrier-count change was exact. Every model that preserved the
+  // count recovered; every model that changed it scored zero.
+  //
+  // Now the permutation is over a FIXED-SIZE BLOCK and is identical for every block,
+  // so it does not depend on `n` at all. A shift of k sites moves which block a
+  // digit lands in but not the permutation itself, and the phase sweep — which
+  // tries "assume p digits were dropped from the front" for p in 0..31 — realigns
+  // it. Whitening stays keyed to absolute index, which the same sweep re-derives.
+  //
+  // The cost, stated plainly: a permutation that repeats every KEY_BLOCK digits is
+  // weaker than a global one. That is the right trade now in a way it was not
+  // before 0.5.0 — `key` is documented as a cost multiplier rather than
+  // confidentiality, and `encKey` (AES-256-GCM) is the real confidentiality
+  // mechanism. Resynchronisable keyed marks are worth more than an unbreakable
+  // interleave on a mark that any edit destroys.
+  var KEY_BLOCK = 32;   // <= MAX_PHASE, so one phase always realigns the grid
+
   function keyStreams(n, radix, seed) {
-    var g = prng32(seed), perm = new Array(n), pn = new Array(n), i, j, t;
-    for (i = 0; i < n; i++) perm[i] = i;
-    for (i = n - 1; i > 0; i--) { j = g() % (i + 1); t = perm[i]; perm[i] = perm[j]; perm[j] = t; } // Fisher–Yates
-    for (i = 0; i < n; i++) pn[i] = g() % radix;
-    return { perm: perm, pn: pn };
+    var g = prng32(seed), b = Math.min(KEY_BLOCK, n), perm = new Array(b), i, j, t;
+    for (i = 0; i < b; i++) perm[i] = i;
+    for (i = b - 1; i > 0; i--) { j = g() % (i + 1); t = perm[i]; perm[i] = perm[j]; perm[j] = t; } // Fisher-Yates
+    // Whitening is block-local for the same reason the permutation is. Keying it to
+    // ABSOLUTE index left one failure standing: quoting the last two thirds of a
+    // document drops ~125 sites off the front, and no sweep over 32 phases can undo
+    // a shift that large. Repeating every KEY_BLOCK makes any shift equivalent to
+    // shift mod 32, which the sweep does cover. Whitening exists for energy
+    // dispersal, not secrecy, so a repeating sequence costs little here.
+    var pn = new Array(b);
+    for (i = 0; i < b; i++) pn[i] = g() % radix;
+    return { perm: perm, pn: pn, block: b };
+  }
+  // Map position i to its permuted position within i's own block. A trailing
+  // partial block is left in place: permuting it would need a different-sized
+  // permutation, which is exactly the n-dependence this removes.
+  function keyIndex(ks, i, n) {
+    var base = i - (i % ks.block);
+    return (base + ks.block <= n) ? base + ks.perm[i % ks.block] : i;
   }
   function scramble(digits, radix, seed) {
     var n = digits.length, ks = keyStreams(n, radix, seed), out = new Array(n), i;
-    for (i = 0; i < n; i++) out[ks.perm[i]] = (digits[i] + ks.pn[i]) % radix; // whiten then interleave
+    for (i = 0; i < n; i++) out[keyIndex(ks, i, n)] = (digits[i] + ks.pn[i % ks.block]) % radix; // whiten then interleave
     return out;
   }
   function descramble(physical, radix, seed) {
     var n = physical.length, ks = keyStreams(n, radix, seed), out = new Array(n), i;
-    for (i = 0; i < n; i++) out[i] = ((physical[ks.perm[i]] - ks.pn[i]) % radix + radix) % radix;
+    for (i = 0; i < n; i++) out[i] = ((physical[keyIndex(ks, i, n)] - ks.pn[i % ks.block]) % radix + radix) % radix;
     return out;
   }
 
@@ -1263,6 +1366,16 @@
     if (!frameBits || frameBits > total) return notDetected();
     var reps = Math.floor(total / frameBits); // frameBits ≥ 32, so this is ≥ 1 here
 
+    // Plain per-bit majority vote, deliberately.
+    //
+    // A reliability-weighted vote was built and measured, using per-site confidence
+    // from the soft layer (SPAB.soft) to down-weight blocks holding more ambiguous
+    // default glyphs. It never helped and twice hurt: scattered folding at 5% went
+    // 56% -> 50%, at 20% went 6% -> 0%. The reason is that the weight cannot tell a
+    // DAMAGED default glyph from a legitimately sent one — about 1/radix of sites
+    // carry the default value in an intact stream — so it penalises good blocks for
+    // their content. Soft information is real and the detector exposes it, but this
+    // is not where it pays. Recorded in dev/roadmap.md so it is not rebuilt.
     var folded = [], agSum = 0, agCnt = 0;
     for (var b = 0; b < frameBits; b++) {
       var ones = 0, cnt = 0;
@@ -1376,7 +1489,14 @@
       { agreement: 1, reps: best.n, resynced: true });
   }
 
-  // RLNC decode: pool self-checking packets from ALL channels, recover any K.
+  // RLNC decode: pool self-checking packets from ALL channels and solve.
+  //
+  // The requirement is K linearly INDEPENDENT equations, not merely K packets. The
+  // systematic ESIs (0..K-1) are independent by construction; repair rows are random
+  // over GF(256) and independent with overwhelming probability, but an arbitrary set
+  // of K rows is not guaranteed full rank. rlncSolve detects an under-rank system and
+  // returns null rather than a wrong answer, and callers should collect K + a few
+  // repair packets rather than exactly K.
   function decodeRLNC(text, ids, key, maxSites, opts) {
     var pool = {}, count = 0;
 
@@ -1492,6 +1612,130 @@
     };
   }
 
+
+  // ---------- soft layer: channel estimation and the likelihood field ----------
+  //
+  // The shipping demodulator reads each site as an exact digit and throws away how
+  // sure it was. That discards real information, because THE CHANNEL IS ASYMMETRIC:
+  // normalization, typography correction and whitespace collapse all fold carrier
+  // variants back onto the default glyph, and nothing does the reverse. No pipeline
+  // turns a plain space into a thin space.
+  //
+  // So the two observations are not equally informative:
+  //   - a NON-DEFAULT variant is near-certain — only the encoder puts one there;
+  //   - the DEFAULT glyph is ambiguous — it may have been sent, or it may be any
+  //     variant that got collapsed on the way.
+  //
+  // How ambiguous depends on how much collapsing happened, and that is measurable
+  // from the carrier histogram itself: an intact marked stream is close to uniform
+  // over the radix, so excess mass on the default value is the signature of
+  // collapse. That is channel estimation with no pilots — the histogram IS the
+  // pilot. See dev/roadmap.md.
+  var SOFT_EPS = 0.02;   // residual doubt on a non-default observation
+
+  // Fraction of sites that look collapsed. If a fraction f of a uniform stream is
+  // folded onto value 0, then h[0] ~ n/r + n*f*(1 - 1/r), so f follows from the
+  // excess. Returns 0 for an intact stream, ->1 for a fully normalized one.
+  function estimateCollapse(digits, radix) {
+    var n = digits.length;
+    if (!n) return 0;
+    var h0 = 0;
+    for (var i = 0; i < n; i++) if (digits[i] === 0) h0++;
+    var excess = h0 - n / radix;
+    if (excess <= 0) return 0;
+    return Math.min(0.99, excess / (n * (1 - 1 / radix)));
+  }
+
+  // P(sent = v | observed), as a vector over the radix.
+  function softDigit(observed, radix, collapse) {
+    var p = new Array(radix), v;
+    if (observed !== 0) {
+      for (v = 0; v < radix; v++) p[v] = SOFT_EPS / (radix - 1);
+      p[observed] = 1 - SOFT_EPS;
+      return p;
+    }
+    // The default glyph: either it was sent, or a variant collapsed onto it.
+    var sent0 = 1 / radix, collapsed = collapse / radix, tot = sent0 + (radix - 1) * collapsed;
+    p[0] = sent0 / tot;
+    for (v = 1; v < radix; v++) p[v] = collapsed / tot;
+    return p;
+  }
+
+  // Per-site posterior over the radix, plus the channel estimate that produced it.
+  function classSoft(text, id) {
+    var digits = classDigits(text, id), radix = CLASS_DEFS[id].radix;
+    var collapse = estimateCollapse(digits, radix), out = new Array(digits.length);
+    for (var i = 0; i < digits.length; i++) out[i] = softDigit(digits[i], radix, collapse);
+    return { digits: digits, radix: radix, collapse: collapse, posteriors: out };
+  }
+
+  // Confidence that a site's hard read is right — max of its posterior. 1/radix
+  // means "no information", 1 means certain.
+  function siteConfidence(p) {
+    var m = 0;
+    for (var i = 0; i < p.length; i++) if (p[i] > m) m = p[i];
+    return m;
+  }
+
+  // ---------- the sliding histogram detector ----------
+  //
+  // Slide a window of `n` sites and, at each position, report the histogram of
+  // carrier values and how far it sits from the uniform distribution an encoded
+  // stream produces. This is the acquisition primitive the architecture asks for:
+  // its output is a FIELD over position, not a symbol stream, and a caller (or a
+  // later sequence decoder) picks structure out of it.
+  //
+  // Why a window rather than the whole document: marks are local. A document that
+  // is half marked and half pasted-in plain text has a uniform histogram over the
+  // marked half and a spike at the default over the other, and only a sliding view
+  // can see the boundary. The window is advanced incrementally — one site out, one
+  // site in — so the whole field costs O(sites), not O(sites x n).
+  function likelihoodField(text, id, n) {
+    var d = classSoft(text, id), digits = d.digits, radix = d.radix;
+    n = n || Math.min(32, digits.length);
+    var out = [];
+    if (!digits.length || n <= 0 || n > digits.length) return { window: n, radix: radix, collapse: d.collapse, field: out };
+    var h = new Array(radix), i, v;
+    for (v = 0; v < radix; v++) h[v] = 0;
+    for (i = 0; i < n; i++) h[digits[i]]++;
+    for (var pos = 0; pos + n <= digits.length; pos++) {
+      if (pos > 0) { h[digits[pos - 1]]--; h[digits[pos + n - 1]]++; }
+      // Chi-square against uniform. A marked window sits near 0; unmarked prose,
+      // where every site is the default glyph, sits at its maximum.
+      var expct = n / radix, chi = 0;
+      for (v = 0; v < radix; v++) chi += (h[v] - expct) * (h[v] - expct) / expct;
+      var chiMax = n * (radix - 1);      // all mass on one value
+      out.push({ at: pos, counts: h.slice(), chi2: +chi.toFixed(4),
+        marked: +Math.max(0, 1 - chi / chiMax).toFixed(4) });
+    }
+    return { window: n, radix: radix, collapse: d.collapse, field: out };
+  }
+
+  // Public: the likelihood field for every enabled carrier class, plus the per-site
+  // posteriors. Exposed because the physical layer should be inspectable on its own
+  // — a caller diagnosing a failed decode wants to see WHERE the mark stopped
+  // looking like a mark, which a boolean cannot say.
+  function detect(text, params) {
+    params = params || {};
+    var ids = resolveClasses(params), n = params.window || 0, out = {};
+    ids.forEach(function (id) {
+      var soft = classSoft(text, id);
+      var lf = likelihoodField(text, id, n || Math.min(32, soft.digits.length));
+      var confSum = 0;
+      for (var i = 0; i < soft.posteriors.length; i++) confSum += siteConfidence(soft.posteriors[i]);
+      out[id] = {
+        sites: soft.digits.length,
+        radix: soft.radix,
+        collapse: +soft.collapse.toFixed(4),
+        meanConfidence: soft.digits.length ? +(confSum / soft.digits.length).toFixed(4) : 0,
+        window: lf.window,
+        field: lf.field,
+        posteriors: soft.posteriors
+      };
+    });
+    return out;
+  }
+
   // ---------- introspection (ws-only, back-compat) ----------
   function getSlots(text) { return CLASS_DEFS.ws.detect(text); } // whitespace sites
   function histogram(text) {
@@ -1501,14 +1745,15 @@
   }
 
   // ---------- version / algorithm descriptor ----------
-  var VERSION = '0.5.0';
+  var VERSION = '0.5.1';
   var algorithm = {
     version: VERSION,
     name: 'plugsym-rep+rlnc',
     summary: 'Pluggable symbol library, independent parallel per-class channels. Two ECC ' +
              'modes: repetition+majority (default) per channel, or a GF(256) systematic ' +
              'RLNC fountain (ecc:"rlnc") whose self-checking/self-locating 32-bit packets ' +
-             'pool across channels so surviving carriers reconstruct any K. Default carriers ' +
+             'pool across channels so surviving carriers reconstruct from any K linearly ' +
+             'independent packets. Default carriers ' +
              '= whitespace + confusables (quote, hyphen), co-equal; whitespace is NFKC-fragile, ' +
              'confusables survive NFKC. Wire format v2 packets (dev/wire-format.md).',
     classes: {
@@ -1607,6 +1852,9 @@
     encode: encode,
     decode: decode,
     histogram: histogram,
+    detect: detect,
+    soft: { classSoft: classSoft, estimateCollapse: estimateCollapse, softDigit: softDigit,
+      siteConfidence: siteConfidence, likelihoodField: likelihoodField },
     readClassBits: readClassBits,
     COMP: COMP,
     ENC: ENC,

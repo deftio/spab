@@ -285,6 +285,35 @@ checksum or have been seen more than once, so a crc8 mark that fits only once ma
 survive an edit that shifts the stream. It still decodes normally by folding. The
 measurement behind that rule is in the wire-format spec (§7).
 
+## Detecting a mark
+
+```js
+const d = SPAB.detect(marked, { classes: ['ws'] }).ws;
+d.collapse        // 0 = intact carriers, ~1 = every variant folded back to a plain space
+d.meanConfidence  // how reliably the sites read
+d.field           // one entry per window position: { at, counts, chi2, marked }
+```
+
+`detect()` slides a window over the carrier sites and reports the histogram at each
+position together with how close it sits to the distribution an encoded stream
+produces. The output is a **field over position**, not a verdict — a caller
+diagnosing a failed decode wants to see *where* the text stopped looking marked,
+which a boolean cannot say.
+
+The channel estimate needs no pilot symbols because the carrier histogram is the
+pilot: an intact marked stream is near-uniform over the radix, so excess mass on the
+plain space measures how much normalization the text has been through. Unmarked prose
+estimates ~0.99, a freshly marked passage ~0.41, and the same passage after NFKC
+returns to ~0.99.
+
+The per-site model is deliberately asymmetric, because the channel is: nothing turns
+a plain space into a thin space, so a variant is near-certain evidence while a plain
+space is ambiguous in proportion to the estimated collapse.
+
+This is also the statistic someone looking *for* a watermark would compute, which is
+why it is exposed rather than hidden — see the detectability note in
+[`dev/roadmap.md`](https://github.com/deftio/spab/blob/main/dev/roadmap.md).
+
 ## Wire format
 
 ```
@@ -371,6 +400,7 @@ Every decode also returns `type`, `compression`, `encryption`, `encrypted`,
 `histogram(text)`, `getSites(text, params)`, `getSlots(text, params)`, `symbols`, `resolveClasses(params)`
 `deriveKey(password, salt, iterations, length)` → PBKDF2-HMAC-SHA256, for callers starting from a passphrase
 `version()` → what this build is and what it can do (below)
+`detect(text, params)` → the sliding histogram detector: likelihood field, per-site posteriors, channel estimate
 `VERSION`, `TYPES`, `COMP`, `ENC`, `algorithm` — `algorithm` is a self-describing object: carriers, bits, ECC, packet layout
 `CLASS_DEFS`, `SPACE_MAP`, `SPACE_NAMES`, `readClassBits(text, id, key, block)` — carrier internals, for introspection and visualisation
 `wire` — the packet layer on its own (build/parse/checksums/LZSS/AES-GCM), exposed for conformance testing
