@@ -27,6 +27,23 @@ function run(cmd, opts) {
   execSync(cmd, Object.assign({ cwd: ROOT, stdio: 'inherit' }, opts || {}));
 }
 
+// Run a command with an ARGUMENT LIST rather than a shell string. Use this for
+// anything whose arguments come from a file the repo edits — CHANGELOG prose, a
+// branch name, a user-supplied --title.
+//
+// `run()` builds one string and hands it to /bin/sh, and JSON.stringify is not a
+// shell quoter: inside double quotes the shell still expands backticks and $(…).
+// A v0.5.0 title derived from a CHANGELOG line containing `dev/wire-format.md`
+// was truncated mid-token, left an unbalanced backtick, and the shell tried to
+// execute what followed. A CHANGELOG containing $(…) would have run it. There is
+// no escaping scheme worth trusting here — do not build the string at all.
+function runArgs(file, args, opts) {
+  console.log('\n  → ' + file + ' ' + args.map(function (a) {
+    return /[^\w@%+=:,./-]/.test(a) ? JSON.stringify(a) : a;
+  }).join(' '));
+  execFileSync(file, args, Object.assign({ cwd: ROOT, stdio: 'inherit' }, opts || {}));
+}
+
 // Run a command and capture its trimmed output. Throws on non-zero exit.
 function runQuiet(cmd) {
   return execSync(cmd, { cwd: ROOT, encoding: 'utf8' }).trim();
@@ -259,14 +276,35 @@ function subjectFromFirstBullet(section) {
 }
 
 // First sentence: everything up to a period followed by whitespace or end.
+// A markdown link's URL can contain a period, so strip markdown BEFORE looking
+// for the sentence end — otherwise "(dev/wire-format.md)" ends the sentence.
 function firstSentence(s) {
-  const stop = s.search(/\.(\s|$)/);
-  return (stop === -1 ? s : s.slice(0, stop)).replace(/\*\*/g, '').trim();
+  const plain = stripMarkdown(s);
+  const stop = plain.search(/\.(\s|$)/);
+  return (stop === -1 ? plain : plain.slice(0, stop)).trim();
 }
 
-// Keep a git subject to a length that displays in `git log --oneline`.
+// A subject line is prose, not markup: a title reading "specified in [`dev/wire-
+// format.md`](dev/wire-format.md)" is worse than useless, and the backticks are
+// what made it dangerous when it was spliced into a shell. Reduce links to their
+// text and drop the inline emphasis markers.
+function stripMarkdown(s) {
+  return s
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')   // [text](url) -> text
+    .replace(/`([^`]*)`/g, '$1')               // `code` -> code
+    .replace(/\*\*|__|\*|_/g, '')               // emphasis markers
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Keep a git subject to a length that displays in `git log --oneline`, cutting at
+// a word boundary. Slicing mid-token produced "[`dev/wire-fo..." — unreadable, and
+// with an unbalanced backtick that the shell then tried to interpret.
 function trimSubject(s) {
-  return s.length > 65 ? s.slice(0, 62).trimEnd() + '...' : s;
+  if (s.length <= 65) return s;
+  const cut = s.slice(0, 62);
+  const sp = cut.lastIndexOf(' ');
+  return (sp > 20 ? cut.slice(0, sp) : cut).trimEnd() + '...';
 }
 
 // Best available subject for a version: prose first, then the first bullet's
@@ -312,6 +350,7 @@ module.exports = {
   VERSION_FILES,
   CHANGELOG,
   run,
+  runArgs,
   runQuiet,
   tryQuiet,
   fail,
