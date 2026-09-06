@@ -98,6 +98,54 @@ paragraph sets about 3% narrower than its source (measured: -3.26% system-ui,
 -2.13% Georgia, 0.00% ui-monospace). Documented on the site. A carrier set chosen
 for equal advance width would remove the tell at some cost in capacity.
 
+## What the characterization run says
+
+`npm run characterize` sweeps 10 fixed samples x 7 payload sizes x 4 carrier sets x
+2 ECC modes x 23 corruption models (~3,465 rows, deterministic). Findings that
+should shape the next round of design:
+
+- **Redundancy is the variable, not text length.** Within the length-preserving
+  carriers: 1 copy 29%, 2 copies 36%, 5-8 copies 57%. Length only matters because
+  it buys copies, so any capacity work should be expressed as "how many copies does
+  this passage hold" rather than "how long is it".
+- **Repetition beats RLNC on equal terms.** The raw table says the opposite (rlnc
+  80% vs repetition 70%) but that compares different populations: rlnc only encodes
+  where there is room for K packets. Paired over the 900 cells both modes could
+  encode, repetition wins 88% to 80%. RLNC's cross-channel pooling has not paid for
+  itself yet — worth understanding before investing further in it.
+- **The confusable channels never encode alone.** `classes: ['apos','hyphen']`
+  failed to fit a payload in *every* combination in the sweep. They are ~1 bit per
+  site and ordinary prose has single digits of them. The "survives NFKC via the
+  confusables" story needs either denser NFKC-durable carriers or a much smaller
+  payload than anything in this matrix.
+- **Zero-width is far more robust, and that is a capacity effect.** Paired against
+  the length-preserving carriers on the same cells: 97% vs 37%. It buys that with
+  bytes and with a mark that is obvious in a hex dump.
+- **The real-world channels split cleanly in two.** Anything that collapses
+  whitespace — pasting into a plain text field, PDF extraction, tokenise-and-rejoin
+  — takes the whitespace payload with it (69%, and the survivors are the zero-width
+  runs). Everything that preserves characters survives at 100%: JSON round trip,
+  trailing-space trim, email quoting, concatenation, markdown stripping,
+  find-and-replace. Sentence reordering is 91%; per-word typos 75%.
+- **Excerpting and word deletion are the weakest survivable cases** (cutPaste 40%,
+  wordDelete 44%, truncate 52%) even after the resync work. This is where more
+  redundancy or a resynchronisable keyed mode would pay.
+
+## Research follow-ups
+
+- **Enlarge the paired corpus.** The technique comparison pairs on cells every
+  scheme can encode, which currently leaves only 6–20 cells — too few to quote.
+  Mid-length samples that all schemes can carry would make it a measurement.
+- **Re-verify the capability matrix** in `r_and_d/docs/prior-art-and-tradeoffs.md`
+  against current releases; the entries come from project documentation and have not
+  been re-checked.
+- **Decide RLNC's future.** Repetition beats it paired (88% vs 80%). RLNC should win
+  where damage is bursty and channels differ in survival; if a targeted test cannot
+  show that, it is complexity without payment.
+- **Position-independent framing.** Point insertion beats spreading on desync purely
+  because a contiguous payload with a scan-anywhere decoder does not care about
+  position. Sync markers or content-addressed packets would aim to have both.
+
 ## Tooling
 
 ### Recovery benchmark in CI — **open**

@@ -72,6 +72,7 @@ function help() {
     '  spab decode --in <file> [options] [--json]',
     '  spab capacity --in <file>',
     '  spab inspect --in <file>            full report as JSON',
+    '  spab version [--json]               version and what this build supports',
     '  spab help',
     '',
     'Options',
@@ -141,6 +142,28 @@ function report(text, d) {
 
 var cmd = process.argv[2], f = parse(process.argv.slice(3));
 if (!cmd || cmd === 'help' || f.help) { help(); process.exit(0); }
+
+// `spab --version` and `spab version` both work: the flag is what people type out of
+// habit, the subcommand is what the other commands look like.
+if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
+  var v = SPAB.version();
+  if (f.json) { console.log(JSON.stringify(v, null, 2)); process.exit(0); }
+  console.log([
+    'spab ' + v.version + '  (' + v.name + ')',
+    '  wire format   v' + v.wireFormat,
+    '  algorithm     ' + v.algorithm,
+    '  carriers      ' + v.carriers.join(', ') + '   (default: ' + v.defaultCarriers.join(', ') + ')',
+    '  ecc           ' + v.ecc.join(', '),
+    '  payload types ' + v.types.join(', '),
+    // The implemented subset, not the registered one: a packet naming a registered
+    // algorithm this build lacks decodes to "unsupported", and knowing that before
+    // encoding is the point of printing it.
+    '  compression   ' + v.compression.join(', '),
+    '  encryption    ' + v.encryption.join(', '),
+    '  checksums     ' + v.checksumBits.map(function (b) { return b + '-bit'; }).join(', ')
+  ].join('\n'));
+  process.exit(0);
+}
 
 if (cmd === 'encode') {
   if (f.message === undefined || f.message === true) { console.error('error: --message is required'); process.exit(1); }

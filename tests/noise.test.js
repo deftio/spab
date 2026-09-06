@@ -69,6 +69,12 @@ const STRUCTURAL = {
   'strip all whitespace variants': t => t.replace(/[   ]/g, ' ')
 };
 
+// Real-world channels, kept in the deterministic suite because these are the ones
+// a mark actually meets. Sourced from the same registry the research harness uses
+// so the two cannot drift apart.
+const REAL = require('../r_and_d/corruptions.js');
+const REAL_MODELS = (REAL.MODELS || REAL);
+
 const MODES = [
   { label: 'repetition', params: { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' } },
   { label: 'rlnc',       params: { classes: ['ws', 'apos', 'hyphen'], ecc: 'rlnc' } },
@@ -136,6 +142,41 @@ if (thin && thick) {
     Math.round(thin.rate * 100) + '% -> ' + Math.round(thick.rate * 100) + '%)');
   ok(thick.rate > 0, 'structural damage is survivable at all with redundancy (' + Math.round(thick.rate * 100) + '%)');
 }
+
+// ---- real-world channels: which survive, and which are known losses ---------
+//
+// These are asserted as a CLASSIFICATION, not a pass mark. A channel that cannot
+// preserve carriers (anything that collapses whitespace) is expected to lose the
+// whitespace payload; a channel that preserves every character is expected to keep
+// it. What must never happen is the reverse — a lossless channel losing the mark,
+// or a destructive one appearing to keep it by returning something wrong.
+(function () {
+  const cover = COVERS.long;
+  const secret = SECRETS.short;
+  const params = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
+  const enc = SPAB.encode(cover, secret, params);
+  const rng = () => 0.5;   // deterministic: models that take an rng get a fixed one
+
+  // Lossless for our carriers: these must always round-trip.
+  const MUST_SURVIVE = ['jsonTrip', 'trimLines', 'emailQuote', 'concat', 'stripMd', 'findReplace'];
+  for (const name of MUST_SURVIVE) {
+    const m = REAL_MODELS[name];
+    if (!m) { ok(false, 'real channel present in registry: ' + name); continue; }
+    const damaged = m.fn(enc.text, m.intensities[0], rng);
+    ok(tryDecode(damaged, params).message === secret, 'lossless channel keeps the mark: ' + name);
+  }
+
+  // Destructive for the whitespace channel: whatever they return, it must never be
+  // a WRONG payload. Losing it is acceptable; inventing one is not.
+  const DESTRUCTIVE = ['collapseWs', 'extractText', 'tokenize'];
+  for (const name of DESTRUCTIVE) {
+    const m = REAL_MODELS[name];
+    if (!m) { ok(false, 'real channel present in registry: ' + name); continue; }
+    const got = tryDecode(m.fn(enc.text, m.intensities[0], rng), params).message;
+    ok(got === null || got === secret, 'destructive channel never yields a wrong payload: ' + name +
+      ' (' + JSON.stringify(got) + ')');
+  }
+})();
 
 // ---- 4: no false positives anywhere ---------------------------------------
 let falsePositives = 0, cleanChecks = 0;

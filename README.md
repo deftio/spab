@@ -48,6 +48,10 @@ The packet format is specified in [`dev/wire-format.md`](dev/wire-format.md); th
 rest of the planned work (compact binary JSON, ChaCha20-Poly1305) is tracked in
 [`dev/roadmap.md`](dev/roadmap.md).
 
+A build reports what it can do — `SPAB.version()` or `spab version` gives the library
+version, the wire format it reads, and the carriers, types, compression and encryption
+code points it actually implements (as opposed to the ones the format registers).
+
 Try it on real text in the browser: **[deftio.github.io/spab](https://deftio.github.io/spab/pages/)**
 
 > Status: early, but published. The **JavaScript reference implementation** (`src/js`) is on npm as

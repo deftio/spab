@@ -301,7 +301,7 @@ the content because tail truncation is spab's commonest loss: a surviving header
 what the missing bytes should have hashed to, which turns the checksum from a pass/fail
 gate into an oracle the erasure decoder can query. The full rationale, the escape
 mechanism, and bit-exact worked examples are in
-[`dev/wire-format.md`](../../dev/wire-format.md).
+[`dev/wire-format.md`](https://github.com/deftio/spab/blob/main/dev/wire-format.md).
 
 Marks written by **0.4.x do not decode here**: that release had a different,
 byte-oriented frame. Accepting both layouts was tried and reverted — a CRC-8 validates
@@ -341,6 +341,7 @@ carrier sites, zero-width count and the decode result together as JSON.
 | param | default | what it does |
 |---|---|---|
 | `classes` | `['ws','apos','hyphen']` | which carriers to use |
+| `profile` | — | legacy shorthand for `classes`: `'ws'` selects whitespace only. Prefer `classes` |
 | `type` | inferred | payload type (see above); an explicit value always wins |
 | `ecc` | `'repetition'` | `'rlnc'` for the GF(256) fountain |
 | `compress` | `true` | try compression, keep it only if the result is smaller |
@@ -369,10 +370,48 @@ Every decode also returns `type`, `compression`, `encryption`, `encrypted`,
 `decode(text, params)` → `{ message, metadata }` (`message` is `null` when nothing verifies)
 `histogram(text)`, `getSites(text, params)`, `getSlots(text, params)`, `symbols`, `resolveClasses(params)`
 `deriveKey(password, salt, iterations, length)` → PBKDF2-HMAC-SHA256, for callers starting from a passphrase
+`version()` → what this build is and what it can do (below)
 `VERSION`, `TYPES`, `COMP`, `ENC`, `algorithm` — `algorithm` is a self-describing object: carriers, bits, ECC, packet layout
+`CLASS_DEFS`, `SPACE_MAP`, `SPACE_NAMES`, `readClassBits(text, id, key, block)` — carrier internals, for introspection and visualisation
 `wire` — the packet layer on its own (build/parse/checksums/LZSS/AES-GCM), exposed for conformance testing
 
 A decode only returns a message when the packet's checksum verifies.
+
+### Self-report
+
+```js
+SPAB.version()
+// {
+//   version: '0.5.0', name: '@deftio/spab', wireFormat: 2,
+//   algorithm: 'plugsym-rep+rlnc',
+//   carriers: ['ws','apos','hyphen','wsdense','zwsp'],
+//   defaultCarriers: ['ws','apos','hyphen'],
+//   ecc: ['repetition','rlnc'],
+//   types: ['string','json','bytes','ser8','uuid','sha256','program','encrypted','extended'],
+//   compression: ['none','lzss'],
+//   encryption: ['none','aes-256-gcm'],
+//   checksumBits: [8,16,32,64,128,256]
+// }
+```
+
+`SPAB.VERSION` is still the bare string. `version()` exists because "which version" is
+rarely the useful question about a codec on its own: a mark may have been written by an
+older or newer build, so what a caller needs is **which wire format this build reads** and
+**which code points it can actually honour**.
+
+That last distinction is the point. `SPAB.algorithm.frame` lists every *registered* code
+point — `deflate-raw`, `gzip`, `brotli`, `zstd`, `chacha20-poly1305`. `version()` lists the
+*implemented* subset. The difference is exactly what predicts an `unsupported` decode, and
+the test suite asserts these lists against what the codec actually does rather than against
+another table that could drift the same way.
+
+From the command line:
+
+```bash
+spab version           # human-readable
+spab version --json    # the same object
+spab --version         # alias
+```
 
 ## Links
 

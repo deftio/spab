@@ -15,7 +15,13 @@ Two things pull against each other:
 
 A short payload in a long passage gets many copies and is very robust. A long payload in
 a short passage barely fits once and is fragile. The baseline uses ~2 bits per inter-word
-space, so a passage of *W* words holds roughly *W/4 − 3* payload bytes per copy.
+space, so a passage of *W* words holds roughly **W/4 − 7** payload bytes per copy.
+
+The −7 is packet overhead: a 17-bit header, a varint length, and a 16-bit checksum come
+to 41 bits, plus the pad to a byte boundary. Measured against the implementation at
+W = 50…1600, which is where the figure comes from. Two caveats: it assumes an
+*incompressible* payload (a compressible one stores smaller and fits more), and a fixed
+type — `uuid`, `ser8`, `sha256` — carries no length field and so buys a byte back.
 
 ## Payload profiles
 

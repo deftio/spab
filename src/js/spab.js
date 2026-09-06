@@ -1570,8 +1570,32 @@
     }
   };
 
+  // What this build is and what it can actually do. A codec is read by software
+  // that may be older or newer than the one that wrote the mark, so "which version"
+  // is rarely the useful question on its own — `wireFormat` says what layout this
+  // build reads, and the capability lists say which code points it can actually
+  // honour rather than merely name. `SPAB.algorithm.frame` names every REGISTERED
+  // code point; these are the implemented subset, and the difference is exactly what
+  // a caller needs to predict an `unsupported` result before encoding.
+  function version() {
+    return {
+      version: VERSION,
+      name: '@deftio/spab',
+      wireFormat: WIRE_VER,
+      algorithm: algorithm.name,
+      carriers: Object.keys(CLASS_DEFS),
+      defaultCarriers: DEFAULT_CLASSES.slice(),
+      ecc: ['repetition', 'rlnc'],
+      types: Object.keys(TYPE_DEFS),
+      compression: Object.keys(COMP_IMPL).map(function (k) { return COMP_NAME[k]; }),
+      encryption: Object.keys(ENC_IMPL).map(function (k) { return ENC_NAME[k]; }),
+      checksumBits: [0, 1, 2, 3, 4, 5].map(cksumBits)
+    };
+  }
+
   var SPAB = {
     VERSION: VERSION,
+    version: version,
     TYPES: TYPE,
     algorithm: algorithm,
     SPACE_MAP: SPACE_MAP,

@@ -684,6 +684,62 @@ for (const cls of [['ws'], ['apos'], ['hyphen'], ['wsdense'], ['zwsp'], ['ws', '
   ok(SPAB.decode(e.text, {}).message !== 'keyed-payload', 'and does not decode without the key');
 })();
 
+// ============================================================ 12b. self-report
+console.log('\n-- 12b. the build reports itself truthfully --');
+
+(function () {
+  const v = SPAB.version();
+  eq(v.version, SPAB.VERSION, 'version() agrees with the VERSION string');
+  eq(v.version, require('../src/js/package.json').version, 'and with the published package version');
+  eq(v.wireFormat, SPAB.algorithm.frame.version, 'version() names the wire format the descriptor does');
+  eq(v.algorithm, SPAB.algorithm.name, 'version() names the algorithm the descriptor does');
+
+  // The point of the capability lists is that they are the IMPLEMENTED subset, not
+  // the registered one — a caller reads them to predict an 'unsupported' result
+  // before encoding. So assert them against what the codec actually does, rather
+  // than against another table that could drift the same way.
+  for (const name of Object.keys(SPAB.COMP)) {
+    const code = SPAB.COMP[name];
+    const f = W.parse(withField('a payload to compress', 'comp', code), 0);
+    const works = !!f && W.open(f, {}).fail !== 'unsupported';
+    const claimed = !!f && v.compression.indexOf(W.fields(f).compression) >= 0;
+    ok(works === claimed, 'version() tells the truth about compression "' + name + '" (' +
+      (works ? 'implemented' : 'not implemented') + ', ' + (claimed ? 'claimed' : 'not claimed') + ')');
+  }
+  for (const name of Object.keys(SPAB.ENC)) {
+    const code = SPAB.ENC[name];
+    if (code === SPAB.ENC.none) continue;   // exercised by every other test in this file
+    const f = W.parse(withField('a payload to encrypt', 'enc', code), 0);
+    const works = !!f && W.open(f, { encKey: KEY_HEX }).fail !== 'unsupported';
+    const claimed = !!f && v.encryption.indexOf(W.fields(f).encryption) >= 0;
+    ok(works === claimed, 'version() tells the truth about encryption "' + name + '" (' +
+      (works ? 'implemented' : 'not implemented') + ', ' + (claimed ? 'claimed' : 'not claimed') + ')');
+  }
+  // Every checksum width it claims must actually round-trip.
+  let ckBad = 0;
+  v.checksumBits.forEach(function (bits, exp) {
+    const p = W.build('checksum claim', 'string', { cksum: exp });
+    const f = W.parse(p.bits, 0);
+    if (!f || W.cksumBits(f.cksum) !== bits) ckBad++;
+  });
+  eq(ckBad, 0, 'every checksum width version() claims actually round-trips');
+  // Every carrier it names must resolve, and every default must be in the full list.
+  eq(v.carriers.filter(function (c) { return !SPAB.CLASS_DEFS[c]; }), [], 'every carrier version() names exists');
+  eq(v.defaultCarriers.filter(function (c) { return v.carriers.indexOf(c) < 0; }), [],
+    'every default carrier is one of the carriers');
+  eq(SPAB.resolveClasses({}), v.defaultCarriers, 'defaultCarriers is what resolveClasses actually picks');
+  // Every ECC mode it names must encode and decode.
+  for (const ecc of v.ecc) {
+    const e = SPAB.encode(COVER, 'ecc-claim', { ecc: ecc });
+    ok(SPAB.decode(e.text, { ecc: ecc }).message === 'ecc-claim', 'ecc mode "' + ecc + '" works as claimed');
+  }
+  eq(v.types.filter(function (t) { return SPAB.TYPES[t] === undefined; }), [], 'every type version() names is in TYPES');
+  // It must be a snapshot, not a live handle onto internal state.
+  const before = SPAB.version().carriers.length;
+  SPAB.version().carriers.push('bogus');
+  eq(SPAB.version().carriers.length, before, 'version() returns a fresh object each call, not shared state');
+})();
+
 // ============================================================ 13. the spec matches
 console.log('\n-- 13. the specification matches the implementation --');
 
