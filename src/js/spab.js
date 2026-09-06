@@ -1877,4 +1877,10 @@
 
   if (typeof module !== 'undefined' && module.exports) module.exports = SPAB;
   root.SPAB = SPAB;
+  // cov-ignore: the browser arm of this ternary IS exercised — tests/branches.test.js
+  // sets global.window, re-requires the module and asserts window.SPAB — and that
+  // assertion passes on every supported Node. What varies is V8's BLOCK ATTRIBUTION
+  // for a re-required script: Node 22 credits the arm, 18 and 20 do not, so making
+  // the coverage gate depend on it makes the gate a function of the runtime rather
+  // than of the tests. The behaviour is covered; the instrumentation is not portable.
 })(typeof window !== 'undefined' ? window : this);
