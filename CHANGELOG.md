@@ -25,6 +25,14 @@ Robustness release, on top of the v2 wire format shipped in 0.5.0.
   front is a shift no 32-phase sweep can undo). Keyed structural recovery is
   **27% -> 98%**, level with unkeyed. **This changes how keyed marks are written:**
   a keyed mark from 0.5.0 does not decode here.
+- **The histogram detector's only test was vacuous.** `histogram()` had exactly one
+  assertion — `total === sum(counts)` — which is self-consistent by construction and
+  would pass if the function counted nothing, counted the wrong characters, or put
+  every variant in the wrong bucket. Mutation-tested against three plausible
+  breakages: the old assertion caught **one of three**, the eight new ones catch all
+  three. They pin exact bucket assignment against `SPACE_MAP` order, the unmarked
+  null case, that a marked passage actually registers, and agreement with
+  `getSlots()`. The function was correct; nothing was checking that it stayed so.
 - **Emoji joiners are no longer read as payload.** U+200D is both a `zwsp` carrier
   variant and the emoji ZERO WIDTH JOINER, so a family emoji's own joiners came back
   as carrier digits — two spurious digits extracted from an *unmarked* cover, which
@@ -64,6 +72,17 @@ Robustness release, on top of the v2 wire format shipped in 0.5.0.
   implementation actually does; a regression that lands silently becomes a
   conformance vector that enshrines it.
 
+  The gate found something on its first run: **coverage differs by Node version.**
+  The same commit reported 758/758 branches on Node 22 and 757/758 on 18 and 20, the
+  missing block being the browser arm of the UMD footer. That arm *is* exercised —
+  `branches.test.js` sets `global.window`, re-requires the module and asserts
+  `window.SPAB`, and that assertion passes everywhere — but V8's **block attribution
+  for a re-required script** credits it on 22 and not on 18/20. Node 18 also reports
+  one more ignorable block than 20 and 22. The block is annotated with the reason and
+  the behavioural assertion stays; gating on it would make the coverage number a
+  function of the runtime rather than of the tests. Worth knowing before the ports
+  land, since cross-version consistency is exactly what they will rely on.
+
 ### Documentation
 
 - **The source header described the 0.1.x codec** — "magic 0xA5", a one-byte length,
@@ -78,6 +97,12 @@ Robustness release, on top of the v2 wire format shipped in 0.5.0.
 - **The determinism claim now states its exception**: identical output for identical
   *explicit* params, except that encryption draws a fresh nonce when `params.nonce`
   is absent.
+- **Two architecture reviews added under `dev/`** — `spab_0.5_review.md` (spab in the
+  text-watermarking landscape, with a gap analysis) and
+  `spab_0.5.0_world_architecture_recommendations.md` (what a sliding-histogram
+  receiver changes and what to build on top of it). Most of this release's work comes
+  from their P0 items; `dev/roadmap.md` records which of their claims survived
+  measurement and which did not.
 - **`r_and_d/docs/prior-art-and-tradeoffs.md` was stale** — it still listed typed
   payloads and encryption as spab's two gaps, both closed in 0.5.0. Corrected and
   version-stamped, since an unstamped capability table goes stale silently.
