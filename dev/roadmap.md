@@ -8,35 +8,66 @@ Status legend: **open** (not started), **partial** (some of it shipped), **done*
 
 ## Payload handling
 
-### Typed payloads — **open**
-The frame is `[magic][len][content][crc8]`; `content` is opaque UTF-8 bytes. There is
-no field saying what the payload *is*, so a decoder cannot tell an identifier from
-JSON from ciphertext, and the CLI can only say "UTF-8 text, as written". A one-byte
-type field would cover: raw text, JSON, binary (base64 in / bytes out), and
-"encrypted — see key material". Costs one byte of every payload and is a frame
-change, so it should land with any other frame work rather than on its own.
+### Typed payloads — **done** (wire format v2, 0.5.0)
+The packet is now bit-level: `[version:3|type:5|comp:3|enc:3|cksum:3]`, extension
+bytes for any escaped field, an optional varint length, the checksum, then the
+content. Type covers string / json / bytes / ser8 / uuid / sha256 / program /
+encrypted; unassigned codes are carried and reported by number so a newer writer and
+an older reader can disagree without losing the payload. Inferred when the caller
+does not say; explicit `params.type` wins. Normative spec: `dev/wire-format.md`.
+
+Two notes for whoever revisits this. The original design argued for **flag-coded**
+types (bits, not bytes) precisely because header bytes are expensive on short
+passages, and that argument won: five fields fit in 17 bits where a byte each would
+have taken 40. And the field went missing in the first place because nothing tested
+it — the `algorithm.frame` descriptor described the code rather than the spec, so the
+gap was invisible. The descriptor is now the contract, `tests/branches.test.js`
+asserts against it, and `tests/wire.test.js` asserts the spec document against the
+implementation.
+
+### Compression — **done** (`comp` field, 0.5.0)
+The packet carries a 3-bit compression field. The reference codec implements LZSS
+(defined in the spec so it depends on no library, and identical in Node and the
+browser); deflate-raw, gzip, brotli and zstd have registered code points for hosts
+that have them. The encoder **tries and skips**: compression is attempted on every
+payload and kept only if strictly smaller, because spab payloads are usually 8-200
+bytes and every general-purpose compressor expands inputs that small.
 
 ### Compact JSON encoding — **open**
-JSON payloads are stored as their literal text, which is the least efficient
-representation available: `{"r":"j.smith","case":42}` is 25 bytes of a 255-byte
-budget. The intended pipeline is **JSON → compact binary → compress → ECC → carriers**.
-A CBOR-shaped encoding plus a small dictionary for repeated keys should cut typical
-metadata payloads by half or better. Needs the type field above so the decoder knows
-to reverse it. Measure before committing: for payloads under ~40 bytes the framing
-overhead of a compressor can exceed its saving.
+JSON payloads are stored as their literal text and then compressed, which helps on
+repetitive metadata but does nothing about the representation itself:
+`{"r":"j.smith","case":42}` is 25 bytes before either step. A CBOR-shaped encoding
+plus a small dictionary for repeated keys should still beat LZSS on typical metadata.
+Now cheap to add — it is a `type` code point, and the machinery to negotiate it is
+already on the wire. Measure against `comp=lzss` before committing.
 
-### Encryption / authenticated payloads — **open**
-`params.key` today whitens and interleaves the symbol stream. That is a cost
-multiplier, not confidentiality, and the docs say so. A real AEAD (payload encrypted
-and authenticated, key separate from the scramble) would make the "encrypted or not"
-question meaningful — and needs the type field to be answerable by a decoder.
+### Encryption / authenticated payloads — **done** (`enc` field, 0.5.0)
+`params.encKey` (a 32-byte key, or 64 hex characters) encrypts the payload with
+AES-256-GCM; the content becomes `nonce ‖ ciphertext ‖ tag`. Implemented in pure JS
+rather than WebCrypto so `encode`/`decode` stay synchronous in every host — WebCrypto's
+AEAD is async everywhere, which would have forced an async public API on a library
+whose whole surface, including the browser demo, is synchronous. Verified against
+Node's own AES-256-GCM byte-for-byte across fourteen lengths.
 
-### Payloads over 255 bytes — **open**
-The frame's length field is one byte. Longer messages are **silently truncated**:
-they encode cleanly and decode to a *different* string, which callers can only
-detect by comparing `metadata.payloadBytes` against their own message length. Either
-make it an explicit error or widen the field (frame change). Silent truncation is
-the wrong default whichever way it goes.
+`params.key` remains a separate thing: it whitens and interleaves the symbol stream,
+which is a cost multiplier, not confidentiality. The two compose.
+
+Still open here:
+
+* **`chacha20-poly1305`** has a code point and no implementation.
+* **Constant-time AES.** The table-driven implementation is not constant-time. That
+  is outside spab's threat model — marking happens locally and offline, and the
+  attacker sees marked text rather than the machine — but a caller who needs it
+  should encrypt with a platform AEAD and pass the ciphertext in as `bytes`.
+* **Key derivation from a passphrase** is offered as `SPAB.deriveKey` (PBKDF2-HMAC-SHA256)
+  and deliberately kept out of the packet, so no salt or iteration count has to
+  travel in a header where every bit is contested. Callers manage their own salt.
+
+### Payloads over 255 bytes — **done** (0.5.0)
+The length is a varint: one byte to 127, two to 16 383, three beyond. The old 255-byte
+ceiling and its silent truncation are gone. A 64 KB sanity bound remains — no cover
+text can carry that — and truncating there is still better than emitting a packet
+whose length field has wrapped.
 
 ## Robustness
 

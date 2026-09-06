@@ -40,7 +40,11 @@ ok(typeof SPAB.VERSION === 'string' && SPAB.algorithm && SPAB.algorithm.name, 'e
 
 // 6. confusables channel: round-trip with ws+punct classes enabled
 var apos = String.fromCharCode(0x27);
-var punctCover = ("It" + apos + "s a co-operative, well-known, old-fashioned fox-trot, isn" + apos + "t it, dear friend. ").repeat(40);
+// 48 repeats, not 40: the RLNC check below needs K 32-bit packets to fit in the
+// NFKC-SURVIVING channels alone (apos + hyphen), and 40 repeats leaves 240 bits
+// against the 256 an 8-byte packet needs — a knife edge that says nothing about the
+// property being demonstrated.
+var punctCover = ("It" + apos + "s a co-operative, well-known, old-fashioned fox-trot, isn" + apos + "t it, dear friend. ").repeat(48);
 var pp = { classes: ['ws', 'punct'] };
 var pe = SPAB.encode(punctCover, 'Hi', pp);
 ok(SPAB.decode(pe.text, pp).message === 'Hi', 'ws+punct round-trip recovers the message');

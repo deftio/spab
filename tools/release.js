@@ -345,8 +345,9 @@ if (existing) {
   const path = require('path');
   const bodyPath = path.join(c.ROOT, '.git', 'SPAB_PR_BODY.md');
   fs.writeFileSync(bodyPath, body + '\n');
-  c.run('gh pr create --base main --title ' + JSON.stringify(title) +
-    ' --body-file ' + JSON.stringify(bodyPath));
+  // Argument list, not a shell string: the title comes from the CHANGELOG, and
+  // JSON.stringify does not stop /bin/sh expanding backticks or $(…) inside it.
+  c.runArgs('gh', ['pr', 'create', '--base', 'main', '--title', title, '--body-file', bodyPath]);
 }
 
 if (!NO_AUTO) {

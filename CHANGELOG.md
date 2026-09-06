@@ -5,7 +5,138 @@ versions follow [SemVer](https://semver.org/). The JavaScript reference implemen
 (`src/js/spab.js`) is published on npm as [`@deftio/spab`](https://www.npmjs.com/package/@deftio/spab);
 the wire format is still settling, so minor versions may change it.
 
-## [Unreleased]
+## [0.5.0] — 2026-09-05
+
+### Changed — wire format v2 (breaking)
+
+The packet format is redesigned and specified in [`dev/wire-format.md`](dev/wire-format.md).
+**Marks written by 0.4.x do not decode here.** Accepting both layouts was tried and reverted: a
+CRC-8 validates by chance about once in 256, so parsing two doubles the ways a random window looks
+like a packet, and a UUID payload came back as a "legacy string" within the hour. The version field
+exists to make the break explicit rather than a guess.
+
+```
+[version:3 | type:5 | comp:3 | enc:3 | cksum:3]   17-bit fixed header
+[extension bytes, grouped, in field order    ]   only for escaped fields
+[len varint                                  ]   only when the type does not imply it
+[checksum, 8 << cksum bits                   ]   before the content
+[content][pad to a byte boundary             ]
+```
+
+- **Bit-level, not byte-aligned.** Five header fields in 17 bits where a byte each would have taken
+  40. The modem is bit-oriented, so rounding to bytes bought nothing.
+- **The checksum precedes the content.** Tail truncation and mid-excerpt are spab's commonest
+  losses, and a trailing checksum dies with the data it protects. In front, a surviving header says
+  what type it is, how many bytes to expect, and what they must hash to — which turns the checksum
+  from a pass/fail gate into an oracle the erasure decoder can query while it is still working.
+- **No magic number.** The header's own plausibility plus the checksum is the discriminator, and
+  unlike a constant it also tells the decoder something. Measured on random streams: 1 false packet
+  per 133 000 windows, and none at all across 199 400 windows of page-sized streams — better than
+  the ~1 in 65 000 the old magic-plus-CRC gave, while saving 8 bits on every packet.
+- **Every enumerated field has an escape.** All-ones means 8 more bits follow, grouped after the
+  fixed header in field order, `0xFF` continuing into another byte. Ranges continue with no gap.
+- **Unassigned `type` codes are carried and reported by number**, so a newer writer and an older
+  reader can disagree without losing the payload. `comp` and `enc` are not relaxed the same way: an
+  unknown algorithm yields nothing usable, so accepting one buys no capability and costs sweep
+  margin.
+
+### Added
+
+- **Compression (`comp` field).** LZSS, defined in the spec so it depends on no library and behaves
+  identically in Node and the browser. The encoder **tries and skips**: compression is attempted on
+  every payload and kept only if strictly smaller, because spab payloads are usually 8-200 bytes and
+  every general-purpose compressor expands inputs that small. `deflate-raw`, `gzip`, `brotli` and
+  `zstd` have registered code points; a packet using one is reported `unsupported`, not dropped.
+- **Encryption (`enc` field).** `params.encKey` encrypts with **AES-256-GCM**; the content becomes
+  `nonce ‖ ciphertext ‖ tag`. Pure JS so `encode`/`decode` stay synchronous in every host — WebCrypto's
+  AEAD is async everywhere and would have forced an async public API on a synchronous library.
+  Verified against Node's own AES-256-GCM byte-for-byte across fourteen lengths, and against
+  FIPS-197 for the block cipher. An encrypted mark is **findable without the key** (the packet keeps
+  a plaintext checksum) and reports `status: 'encrypted'`; a wrong key reports `auth-failed`.
+- **`SPAB.deriveKey(password, salt, iterations, length)`** — PBKDF2-HMAC-SHA256, verified against
+  Node. Deliberately kept *out* of the packet so no salt or iteration count travels in a header
+  where every bit is contested.
+- **Selectable checksum width.** `params.cksum` is a 3-bit exponent, `bits = 8 << n`: crc8, crc16,
+  crc32, then SHA-256 truncated to 64, 128 and 256 bits. Defaults by stored size. There is
+  deliberately no "none" — with no magic number, the checksum is what finds a packet at all.
+- **`SPAB.version()`** — what this build is and what it can actually do: library version, wire format,
+  carriers, ECC modes, payload types, and the **implemented** compression, encryption and checksum
+  code points. `SPAB.algorithm.frame` lists every *registered* code point; `version()` lists the
+  subset this build honours, and the difference is exactly what predicts an `unsupported` decode.
+  `SPAB.VERSION` remains the bare string. The suite asserts these lists against what the codec
+  actually does, not against another table that could drift the same way.
+- **`spab version`** (and `spab --version`, `spab version --json`) — the CLI had no way to report its
+  own version at all.
+- **`SPAB.wire`** — the packet layer on its own (build/parse/size/checksums/LZSS/AES-GCM/varint),
+  exposed so conformance tests drive it directly rather than inferring it through the carrier and
+  ECC layers.
+- **`tests/wire.test.js`** — 288 assertions across thirteen sections: primitives against published
+  vectors (FIPS-180, RFC 4231, FIPS-197, the CRC check values, and Node itself), bit I/O and varint
+  boundaries, the escape mechanism across type codes 31 to 541, packet geometry per size class,
+  every payload type, **every length from 1 to 300 bytes plus both varint boundaries**, compression
+  across five compressible and four incompressible shapes plus 510 LZSS round-trips, encryption
+  across thirteen lengths and four key forms, every checksum width with **exhaustive single-bit
+  corruption detection**, the truncation property, a measured false-accept rate, end-to-end through
+  every carrier and both ECC modes, and a check that the spec document matches the implementation.
+- **`npm run wire:tables`** regenerates the worked-example and overhead tables in the spec from the
+  implementation, so its numbers are measured rather than asserted. `--check` gates CI on drift.
+- **CLI options** `--enc-key`, `--cksum`, `--no-compress`, `--ecc`, and a decode report that names
+  every header field: wire version, type, compression, encryption, checksum width, stored and
+  opened sizes.
+
+### Documentation
+
+- **`tests/README.md` listed only `roundtrip.test.js`** — it predated `branches`, `wire`, `noise`,
+  `fuzz` and the coverage gate. Now describes what each file holds the code to, and the two
+  conventions behind them: the descriptor is the contract, and a wrong answer costs more than a
+  missed one.
+- **The capacity rule of thumb was wrong.** `docs/capacity-vs-robustness.md` said a passage of *W*
+  words holds ~`W/4 − 3` payload bytes per copy; the −3 was the old 3-byte frame. Measured against
+  the implementation at W = 50…1600, it is **`W/4 − 7`** (a 17-bit header, a varint length, a 16-bit
+  checksum and the pad come to 41 bits), with the caveats that it assumes an incompressible payload
+  and that a fixed type carries no length field.
+- **The npm README linked out of the published package.** `src/js/README.md` pointed at
+  `../../dev/wire-format.md`, which resolves in the repo and 404s on npmjs.com — the package ships
+  only `spab.js`, `cli.js`, `README.md` and `LICENSE`. Now an absolute GitHub link.
+- **Documented the exports nothing mentioned**: `CLASS_DEFS`, `SPACE_MAP`, `SPACE_NAMES`,
+  `readClassBits`, and `params.profile` (a legacy shorthand for `classes`).
+
+### Fixed
+
+- **`payloadBytes` was the only size reported**, which became ambiguous once payloads could be
+  compressed. `payloadBytes` is now the stored size and `messageBytes` the opened size.
+- **The capacity warning quoted the wrong requirement in RLNC mode.** RLNC spends a 32-bit packet
+  per source byte, so a 52-byte packet needs 1664 bits where repetition needs 416 — the message
+  quoted the repetition figure in both modes, producing warnings that contradicted themselves
+  ("needs 416 bits, best channel has 1314").
+- **`algorithm.ecc` was defined twice** in the descriptor object, so the second definition silently
+  overwrote the first and the RLNC description never appeared.
+- **A wrong payload could be returned from a damaged mark.** The new noise matrix caught it: when a
+  mark is thin enough that only one copy fits, folding cannot vote and the blind resync sweep
+  decides — and the sweep accepted a chance window as a 32-byte `sha256` packet, a fixed type with
+  no length field to constrain it and 8 bits of CRC as the only obstacle. Two changes:
+  - the **default checksum floor is now crc16**, not crc8. The capacity argument for crc8 was weak
+    (an 8-byte serial is 89 bits with crc8, 97 with crc16, against a memo that holds 64 either way)
+    and it cost a factor of 256 in false accepts. crc8 remains available as `cksum: 0`.
+  - a packet found by **blind sweep** must carry at least a 16-bit checksum *or* have been seen more
+    than once. Measured over 1539 thin damaged marks: without the rule, 2 wrong payloads and 885
+    recoveries; with it, 0 wrong and 864. It costs 2.4% of recoveries to remove a 0.13% chance of
+    confidently returning something that was never written.
+
+  Worth recording that the original §7 of the wire-format spec justified dropping the magic byte on
+  **random-stream** measurements alone. Real streams are structured — they contain shifted, damaged
+  copies of a real packet, which produce header-shaped patterns far more often than noise — and that
+  gap is what let the false positive through. The spec now carries both numbers.
+- **The release script spliced the PR title into a shell command.** `release.js` built
+  `gh pr create --title <title>` as one string and handed it to `/bin/sh`, with `JSON.stringify` as
+  the only quoting — and inside double quotes the shell still expands backticks and `$(…)`. A v0.5.0
+  title derived from a CHANGELOG line containing `` `dev/wire-format.md` `` was truncated mid-token,
+  left an unbalanced backtick, and the shell tried to execute what followed. A CHANGELOG containing
+  `$(…)` would have run it. Fixed with `runArgs()` (`execFileSync`, argument list, no shell); the
+  derived subject now strips markdown and trims at a word boundary. The body was already passed by
+  file "because it contains backticks" — the title had the same property and was missed.
+- **The RLNC/NFKC round-trip test was on a capacity knife edge** (240 surviving bits against the 256
+  an 8-byte packet needs), so a one-byte growth in the packet broke it. Given the cover it needs.
 
 ### Added
 - **11 real-world corruption models** in `r_and_d/corruptions.js`: pasting into a plain text field,

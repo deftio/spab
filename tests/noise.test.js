@@ -192,9 +192,8 @@ for (const mode of MODES) {
 ok(falsePositives === 0, 'no payload is ever reported from unmarked text (' + cleanChecks + ' checks)');
 
 // ---- payload shapes -------------------------------------------------------
-// The frame carries opaque UTF-8 bytes, so anything that survives a UTF-8 round
-// trip and fits in 255 bytes is a valid payload. These are the shapes documented
-// as supported.
+// Anything that survives a UTF-8 round trip and fits the cover's capacity is a valid
+// payload. These are the shapes documented as supported.
 const cover = COVERS.long;
 const P = { classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' };
 const SHAPES = {
@@ -210,6 +209,83 @@ for (const [label, payload] of Object.entries(SHAPES)) {
   const e = SPAB.encode(cover, payload, P);
   ok(SPAB.decode(e.text, P).message === payload, 'payload shape round-trips: ' + label);
 }
+
+// ---- 5: the wire-format dimensions, under damage ---------------------------
+//
+// Compression and encryption change the packet's size and shape, which changes how
+// many copies fit and therefore how much damage the mark survives. Section 1 covers
+// the clean round trip; this checks the same two rules hold with them on:
+// carrier-preserving damage is always recovered, and structural damage never
+// produces a silently wrong answer.
+const ENC_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
+const WIRE_COVER = COVERS.long + COVERS.long;
+const WIRE_MODES = [
+  { label: 'compressed',        params: {} ,                          secret: 'na'.repeat(40) },
+  { label: 'uncompressed',      params: { compress: false },          secret: 'na'.repeat(40) },
+  { label: 'encrypted',         params: { encKey: ENC_KEY },          secret: 'classified-payload' },
+  { label: 'compressed+encrypted', params: { encKey: ENC_KEY },       secret: 'na'.repeat(40) },
+  { label: 'crc8',              params: { cksum: 0 },                 secret: 'acme-42' },
+  { label: 'crc32',             params: { cksum: 2 },                 secret: 'acme-42' },
+  { label: 'sha256 checksum',   params: { cksum: 5 },                 secret: 'acme-42' },
+  { label: 'uuid payload',      params: {},                           secret: '3f2504e0-4f89-11d3-9a0c-0305e82c3301' },
+  { label: 'bytes payload',     params: { type: 'bytes' },            secret: [0, 1, 254, 255, 65, 7, 200] }
+];
+let wireClean = 0, wirePreserving = 0, wireWrong = 0, wireSkipped = 0;
+for (const wm of WIRE_MODES) {
+  const params = Object.assign({ classes: ['ws', 'apos', 'hyphen'], ecc: 'repetition' }, wm.params);
+  const same = (got) => Array.isArray(wm.secret)
+    ? (Array.isArray(got) && got.join(',') === wm.secret.join(','))
+    : got === wm.secret;
+  // Twice the long cover, so every combination has room: an 80-byte payload stored
+  // uncompressed needs 688 bits and COVERS.long holds 670, which is a capacity fact
+  // rather than anything about the wire format.
+  const e = SPAB.encode(WIRE_COVER, wm.secret, params);
+  const clean = tryDecode(e.text, params);
+  if (!same(clean.message)) {
+    // Did not fit is allowed; being WRONG or silent about it is not.
+    wireSkipped++;
+    if (clean.message !== null || !(e.metadata.issues || []).length) {
+      wireWrong++; console.error('    ' + wm.label + ' failed to round-trip without saying why');
+    }
+    continue;
+  }
+  wireClean++;
+  for (const [dn, dmg] of Object.entries(PRESERVING)) {
+    const d = tryDecode(dmg(e.text), params);
+    if (same(d.message)) wirePreserving++;
+    else { wireWrong++; console.error('    ' + wm.label + ' / ' + dn + ' -> ' + d.metadata.status); }
+  }
+  for (const dmg of Object.values(STRUCTURAL)) {
+    const d = tryDecode(dmg(e.text), params);
+    // Recovery is not required; a WRONG answer is forbidden.
+    if (d.message !== null && !same(d.message)) {
+      wireWrong++; console.error('    ' + wm.label + ' returned a wrong payload after structural damage');
+    }
+  }
+}
+ok(wireClean + wireSkipped === WIRE_MODES.length && wireSkipped === 0,
+  'every wire-format combination round-trips clean (' + wireClean + '/' + WIRE_MODES.length +
+  (wireSkipped ? ', ' + wireSkipped + ' did not fit' : '') + ')');
+ok(wirePreserving === wireClean * Object.keys(PRESERVING).length,
+  'carrier-preserving damage is recovered with compression, encryption and every checksum width (' + wirePreserving + ' checks)');
+ok(wireWrong === 0, 'no wire-format combination ever returns a wrong payload (' +
+  (wireClean * Object.keys(STRUCTURAL).length) + ' structural checks)');
+
+// An encrypted mark must never yield its plaintext to a decoder without the key,
+// however the text is damaged.
+let leaked = 0, located = 0;
+const encMark = SPAB.encode(WIRE_COVER, 'classified-payload', { classes: ['ws', 'apos', 'hyphen'], encKey: ENC_KEY });
+for (const dmg of [t => t].concat(Object.values(PRESERVING), Object.values(STRUCTURAL))) {
+  const d = tryDecode(dmg(encMark.text), { classes: ['ws', 'apos', 'hyphen'] });
+  if (d.message !== null) leaked++;
+  if (d.metadata.status === 'encrypted') located++;
+}
+ok(leaked === 0, 'an encrypted mark never yields its plaintext without the key, under any damage model');
+ok(located > 0, 'and is still located and reported as encrypted (' + located + ' of 15 damage models)');
+
+// A wrong key is reported as a wrong key, not as an absent mark.
+ok(tryDecode(encMark.text, { classes: ['ws', 'apos', 'hyphen'], encKey: ENC_KEY.replace(/^00/, '01') }).metadata.status === 'auth-failed',
+  'a wrong key reports auth-failed rather than not-detected');
 
 console.log('noise: ' + pass + ' passed, ' + fail + ' failed');
 if (fail > 0) { console.error('FAIL'); process.exit(1); }
