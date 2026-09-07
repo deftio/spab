@@ -14,76 +14,87 @@ payloads and corruption models as `r_and_d/benchmark.js`.
 | text samples     | 10 fixed samples from r_and_d/samples.js                                                                                     |
 | cover lengths    | 1x, 4x, 12x (each sample repeated)                                                                                           |
 | payload sizes    | 4B, 8B, 20B, 32B, 67B, 130B                                                                                                  |
-| channel models   | 27 (catalogued in r_and_d/attacks.js)                                                                                        |
+| channel models   | 28 (catalogued in r_and_d/attacks.js)                                                                                        |
 | intensity        | median of each model's declared range, except the safety table which uses the worst                                          |
 | rng seed         | fixed per cell — the same damage is applied to every library                                                                 |
 | clean round trip | required before any damage is applied; a library that cannot carry a payload is excluded from that cell rather than scored 0 |
 
 ## Libraries
 
-| library              | source                           | ran     | to enable                               |
-|----------------------|----------------------------------|---------|-----------------------------------------|
-| spab                 | local:0.5.1 (wire v2)            | yes     |                                         |
-| StegCloak (AES+HMAC) | npm:stegcloak@1.1.1              | yes     |                                         |
-| StegCloak (plain)    | npm:stegcloak@1.1.1              | yes     |                                         |
-| VSRMark              | not configured (set VSRMARK_BIN) | SKIPPED | build from source, then set VSRMARK_BIN |
-| zero-width (bare)    | npm:zero-width-lib@1.1.0         | yes     |                                         |
+| library                  | source                           | ran     | to enable                               |
+|--------------------------|----------------------------------|---------|-----------------------------------------|
+| emoji-smuggle            | npm:emoji-smuggle-sdk@1.0.2      | yes     |                                         |
+| spab (zero-width)        | local:0.5.1 (wire v2)            | yes     |                                         |
+| spab (length-preserving) | local:0.5.1 (wire v2)            | yes     |                                         |
+| StegCloak (AES+HMAC)     | npm:stegcloak@1.1.1              | yes     |                                         |
+| StegCloak (plain)        | npm:stegcloak@1.1.1              | yes     |                                         |
+| @vercel/stega            | npm:@vercel/stega@1.1.0          | yes     |                                         |
+| VSRMark                  | not configured (set VSRMARK_BIN) | SKIPPED | build from source, then set VSRMARK_BIN |
+| zero-width-lib           | npm:zero-width-lib@1.1.0         | yes     |                                         |
 
-_1 of 5 skipped. A skipped library is absent,
+_1 of 8 skipped. A skipped library is absent,
 not bad: it produced no numbers and has no rows below._
 
 Caveats that make a comparison unequal, stated up front:
 
+- **emoji-smuggle** — payload sits at a single point appended to the text, not spread through it
+- **spab (zero-width)** — inserts characters, so the document grows and an invisible-character sanitiser removes the mark
+- **spab (length-preserving)** — length-preserving, so capacity is bounded by the text and whitespace normalisation destroys the main carrier
 - **StegCloak (AES+HMAC)** — one insertion point; integrity available only together with encryption
 - **StegCloak (plain)** — one insertion point, so any edit removing it removes everything; NO integrity in this mode (HMAC needs encryption)
-- **zero-width (bare)** — no integrity check, so a damaged mark can decode to a WRONG payload rather than none
+- **@vercel/stega** — designed for editor round-trips, not adversarial channels; no integrity check
+- **zero-width-lib** — no integrity check, so a damaged mark can decode to a WRONG payload rather than none
 
 ## 1. Payload capacity
 
 Whether each library round-trips each payload on a clean cover, before any
 damage. `-` means it declined or could not carry it.
 
-| library              | magic (4B) | magic8 (8B) | sha1 (20B) | sha256 (32B) | json (67B) | program (130B) |
-|----------------------|-----------:|------------:|-----------:|-------------:|-----------:|---------------:|
-| spab                 |        70% |         67% |        53% |          43% |        27% |            13% |
-| StegCloak (AES+HMAC) |        87% |         87% |        90% |          87% |        90% |            87% |
-| StegCloak (plain)    |        87% |         90% |        90% |          83% |        90% |            90% |
-| zero-width (bare)    |       100% |        100% |       100% |         100% |       100% |           100% |
+| library                  | magic (4B) | magic8 (8B) | sha1 (20B) | sha256 (32B) | json (67B) | program (130B) |
+|--------------------------|-----------:|------------:|-----------:|-------------:|-----------:|---------------:|
+| emoji-smuggle            |       100% |        100% |       100% |         100% |       100% |           100% |
+| spab (zero-width)        |        87% |         87% |        87% |          80% |        67% |            53% |
+| spab (length-preserving) |        70% |         67% |        53% |          43% |        27% |            13% |
+| StegCloak (AES+HMAC)     |        87% |         90% |        87% |          90% |        90% |            90% |
+| StegCloak (plain)        |        90% |         90% |        87% |          90% |        90% |            87% |
+| @vercel/stega            |       100% |        100% |       100% |         100% |       100% |           100% |
+| zero-width-lib           |       100% |        100% |       100% |         100% |       100% |           100% |
 
 ## 2. Recovery per corruption model
 
 Median intensity of each model, over every clean round trip. This is the
 comparison the whole folder exists for.
 
-| model        | intensity | spab 0.5.1 | StegCloak (AES+HMAC) 1.1.1 | StegCloak (plain) 1.1.1 | zero-width (bare) 1.1.0 |
-|--------------|----------:|-----------:|---------------------------:|------------------------:|------------------------:|
-| findReplace  |         1 |       100% |                       100% |                    100% |                    100% |
-| jsonTrip     |         1 |       100% |                       100% |                    100% |                    100% |
-| smartQuotes  |         1 |       100% |                       100% |                    100% |                    100% |
-| stripMd      |         1 |       100% |                       100% |                    100% |                    100% |
-| trimLines    |         1 |       100% |                       100% |                    100% |                    100% |
-| concat       |         1 |        94% |                       100% |                    100% |                    100% |
-| reorder      |         1 |        78% |                       100% |                    100% |                    100% |
-| emailQuote   |         1 |        73% |                       100% |                    100% |                    100% |
-| blockErasure |      0.25 |        63% |                       100% |                    100% |                    100% |
-| saltPepper   |       0.2 |        21% |                       100% |                    100% |                    100% |
-| typos        |      0.15 |       100% |                        86% |                     84% |                     50% |
-| collapseWs   |         1 |         2% |                       100% |                    100% |                    100% |
-| fullStrip    |         1 |         2% |                       100% |                    100% |                    100% |
-| nfkc         |         1 |         2% |                       100% |                    100% |                    100% |
-| regexAttack  |      0.67 |         2% |                       100% |                    100% |                    100% |
-| wordInsert   |       0.1 |         2% |                       100% |                    100% |                    100% |
-| normalize    |       0.5 |         0% |                       100% |                    100% |                    100% |
-| truncate     |       0.5 |        66% |                        50% |                     71% |                     86% |
-| wordDelete   |       0.1 |         0% |                        87% |                     90% |                     67% |
-| extractText  |         1 |         2% |                       100% |                    100% |                     17% |
-| reflow       |         1 |         2% |                       100% |                    100% |                     17% |
-| tokenize     |         1 |         2% |                       100% |                    100% |                     17% |
-| zwNoise      |       0.3 |       100% |                         0% |                     17% |                      0% |
-| stripZw      |         1 |       100% |                         0% |                      0% |                      0% |
-| cutPaste     |       0.5 |        50% |                        15% |                     24% |                      0% |
-| truncTail    |       0.5 |        52% |                         0% |                      0% |                      0% |
-| midExcerpt   |      0.25 |        23% |                         8% |                     12% |                      0% |
+| model         | intensity | emoji-smuggle 1.0.2 | spab (zero-width) 0.5.1 | spab (length-preserving) 0.5.1 | StegCloak (AES+HMAC) 1.1.1 | StegCloak (plain) 1.1.1 | @vercel/stega 1.1.0 | zero-width-lib 1.1.0 |
+|---------------|----------:|--------------------:|------------------------:|-------------------------------:|---------------------------:|------------------------:|--------------------:|---------------------:|
+| findReplace   |         1 |                100% |                    100% |                           100% |                       100% |                    100% |                100% |                 100% |
+| jsonTrip      |         1 |                100% |                    100% |                           100% |                       100% |                    100% |                100% |                 100% |
+| smartQuotes   |         1 |                100% |                    100% |                           100% |                       100% |                    100% |                100% |                 100% |
+| stripMd       |         1 |                100% |                    100% |                           100% |                       100% |                    100% |                100% |                 100% |
+| trimLines     |         1 |                100% |                    100% |                           100% |                       100% |                    100% |                100% |                 100% |
+| concat        |         1 |                100% |                    100% |                            94% |                       100% |                    100% |                100% |                 100% |
+| emailQuote    |         1 |                100% |                    100% |                            73% |                       100% |                    100% |                100% |                 100% |
+| reorder       |         1 |                100% |                     91% |                            78% |                       100% |                    100% |                100% |                 100% |
+| blockErasure  |      0.25 |                100% |                    100% |                            63% |                       100% |                    100% |                100% |                 100% |
+| saltPepper    |       0.2 |                100% |                    100% |                            21% |                       100% |                    100% |                100% |                 100% |
+| collapseWs    |         1 |                100% |                    100% |                             2% |                       100% |                    100% |                100% |                 100% |
+| fullStrip     |         1 |                100% |                    100% |                             2% |                       100% |                    100% |                100% |                 100% |
+| nfkc          |         1 |                100% |                    100% |                             2% |                       100% |                    100% |                100% |                 100% |
+| normalize     |       0.5 |                100% |                    100% |                             2% |                       100% |                    100% |                100% |                 100% |
+| regexAttack   |      0.67 |                100% |                    100% |                             2% |                       100% |                    100% |                100% |                 100% |
+| wordInsert    |       0.1 |                 83% |                    100% |                             2% |                       100% |                    100% |                 18% |                 100% |
+| typos         |      0.15 |                 65% |                     61% |                           100% |                        91% |                     94% |                 16% |                  50% |
+| wordDelete    |       0.1 |                 73% |                     54% |                             0% |                        92% |                     93% |                 19% |                  67% |
+| truncate      |       0.5 |                  0% |                     87% |                            66% |                        51% |                     74% |                  0% |                  86% |
+| extractText   |         1 |                  0% |                    100% |                             2% |                       100% |                    100% |                  0% |                  17% |
+| reflow        |         1 |                  0% |                    100% |                             2% |                       100% |                    100% |                  0% |                  17% |
+| tokenize      |         1 |                  0% |                    100% |                             2% |                       100% |                    100% |                  0% |                  17% |
+| truncTail     |       0.5 |                 71% |                     78% |                            52% |                         0% |                      0% |                 82% |                   0% |
+| cutPaste      |       0.5 |                  0% |                     76% |                            50% |                        13% |                     26% |                  0% |                   0% |
+| zwNoise       |       0.3 |                  0% |                      0% |                           100% |                         0% |                     17% |                  0% |                   0% |
+| midExcerpt    |      0.25 |                  0% |                     57% |                            23% |                         5% |                     15% |                  0% |                   0% |
+| stripZw       |         1 |                  0% |                      0% |                           100% |                         0% |                      0% |                  0% |                   0% |
+| sanitisePaste |         1 |                  0% |                      0% |                             2% |                         0% |                      0% |                  0% |                   0% |
 
 ## 3. Safety: does a damaged mark ever decode to the WRONG payload?
 
@@ -91,12 +102,15 @@ Distinct from robustness and arguably more important. Losing a watermark is a
 non-answer; returning a different one is a false provenance claim. A library
 with no integrity check can do the second.
 
-| library              | false positive | wrong payload | lost | recovered | verdict       |
-|----------------------|---------------:|--------------:|-----:|----------:|---------------|
-| spab                 |           0/30 |            15 | 1187 |      1012 | **1% wrong**  |
-| StegCloak (AES+HMAC) |           0/30 |           180 |  784 |      3356 | **4% wrong**  |
-| StegCloak (plain)    |           0/30 |           428 |  513 |      3406 | **10% wrong** |
-| zero-width (bare)    |           0/30 |           726 |  893 |      3241 | **15% wrong** |
+| library                  | false positive | wrong payload | lost | recovered | verdict       |
+|--------------------------|---------------:|--------------:|-----:|----------:|---------------|
+| emoji-smuggle            |           0/30 |            65 | 1929 |      3046 | **1% wrong**  |
+| spab (zero-width)        |           0/30 |             9 |  813 |      3042 | **0% wrong**  |
+| spab (length-preserving) |           0/30 |            15 | 1267 |      1014 | **1% wrong**  |
+| StegCloak (AES+HMAC)     |           0/30 |           269 |  858 |      3353 | **6% wrong**  |
+| StegCloak (plain)        |           0/30 |           539 |  538 |      3403 | **12% wrong** |
+| @vercel/stega            |           0/30 |             8 | 2197 |      2835 | **0% wrong**  |
+| zero-width-lib           |           0/30 |           756 | 1043 |      3241 | **15% wrong** |
 
 `false positive` is how often unmarked text yielded a payload. `wrong payload`
 is how often a DAMAGED mark decoded to something other than what was written.
@@ -104,12 +118,15 @@ is how often a DAMAGED mark decoded to something other than what was written.
 What a wrong return looks like — garbage, not a forged watermark, though a
 caller checking `if (decoded)` cannot tell the difference:
 
-| library              | model     | written                                                                               | returned                            |
-|----------------------|-----------|---------------------------------------------------------------------------------------|-------------------------------------|
-| spab                 | normalize | "{\"src\":\"spab\",\"id\":4821,\"by\":\"m.chatterjee\",\"rights\":\"CC-BY\",\"v\":1}" | "�\u0000\u0000\u0001�D\u0000��a��…" |
-| StegCloak (AES+HMAC) | stripZw   | "SPAB"                                                                                | "\u0012��iD\n�(\u0015\u0000\u001a…" |
-| StegCloak (plain)    | stripZw   | "SPAB"                                                                                | "QA\u0005"                          |
-| zero-width (bare)    | stripZw   | "SPAB"                                                                                | "˯"                                 |
+| library                  | model         | written                                                                               | returned                            |
+|--------------------------|---------------|---------------------------------------------------------------------------------------|-------------------------------------|
+| emoji-smuggle            | zwNoise       | "SPAB-001"                                                                            | "q�$:��\u001dH\u0010\b\u0004\u001…" |
+| spab (zero-width)        | typos         | "{\"src\":\"spab\",\"id\":4821,\"by\":\"m.chatterjee\",\"rights\":\"CC-BY\",\"v\":1}" | "d8880005-f400-0000-0000-00000000…" |
+| spab (length-preserving) | normalize     | "{\"src\":\"spab\",\"id\":4821,\"by\":\"m.chatterjee\",\"rights\":\"CC-BY\",\"v\":1}" | "�\u0000\u0000\u0001�D\u0000��a��…" |
+| StegCloak (AES+HMAC)     | sanitisePaste | "SPAB-001"                                                                            | "\u0005\u0015\u0001\u0010\u0014DP…" |
+| StegCloak (plain)        | sanitisePaste | "SPAB"                                                                                | "QA\u0005"                          |
+| @vercel/stega            | typos         | "a94a8fe5ccb19ba61c4c"                                                                | "a94a8fe5cc`�ى��Ō�c"                |
+| zero-width-lib           | sanitisePaste | "SPAB"                                                                                | "˯"                                 |
 
 ---
 

@@ -83,7 +83,7 @@ SPAB.encode(text, msg, { classes: ['apos', 'hyphen'] });         // NFKC-durable
 ## Error correction
 
 ```js
-SPAB.encode(text, msg, { ecc: 'repetition' });   // default: frame repeated, per-bit majority vote
+SPAB.encode(text, msg, { ecc: 'repetition' });   // default: packet repeated, per-bit majority vote
 SPAB.encode(text, msg, { ecc: 'rlnc' });         // GF(256) fountain; packets pool across channels
 ```
 
@@ -373,6 +373,7 @@ carrier sites, zero-width count and the decode result together as JSON.
 | `profile` | — | legacy shorthand for `classes`: `'ws'` selects whitespace only. Prefer `classes` |
 | `type` | inferred | payload type (see above); an explicit value always wins |
 | `ecc` | `'repetition'` | `'rlnc'` for the GF(256) fountain |
+| `rlncGeom` | `'default'` | fountain packet geometry: `'v1'`, `'default'`, `'wide'`, `'widest'`. Encode and decode must match |
 | `compress` | `true` | try compression, keep it only if the result is smaller |
 | `encKey` | — | 32-byte key or 64 hex characters; encrypts with AES-256-GCM |
 | `cksum` | by size | checksum exponent 0–5, `bits = 8 << n` |

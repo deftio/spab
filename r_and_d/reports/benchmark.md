@@ -16,35 +16,36 @@ before any number.
 `channel` is ordinary document handling. `attack` is someone deliberately
 removing a mark, which spab explicitly does not claim to resist.
 
-| model        | kind    | what it does                                                    | what it stands in for                                                                                                                                                                            | damages                                       | intensities             |
-|--------------|---------|-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|-------------------------|
-| jsonTrip     | control | Serialises the text into a JSON string and parses it back.      | Every API boundary does this. It must be lossless, so a failure here means the codec is broken, not that the channel is hostile.                                                                 | nothing                                       | 1                       |
-| blockErasure | channel | Retypes a contiguous span, destroying its carriers.             | A paragraph rewritten by hand. Burst damage rather than scattered.                                                                                                                               | a contiguous run of carriers                  | 0.1 / 0.25 / 0.5        |
-| collapseWs   | channel | Collapses every run of whitespace to a single plain space.      | Pasting into a plain-text field, an HTML renderer, or anything that normalises spacing. This is the single commonest way a whitespace watermark dies.                                            | the whitespace channel, completely            | 1                       |
-| concat       | channel | Pastes the marked text into the middle of a larger document.    | A quoted passage inside a report. Carriers are gained rather than lost, which desynchronises any scheme that keys placement to the total.                                                        | carrier count (adds sites at both ends)       | 1                       |
-| cutPaste     | channel | Copies a portion out to a new document.                         | Ordinary quoting. Differs from truncate in that the span can start anywhere.                                                                                                                     | everything outside the copied span            | 0.75 / 0.5 / 0.25       |
-| emailQuote   | channel | Prefixes every line with "> ", as a reply quote does.           | Replying to an email. Adds characters but leaves inter-word gaps intact.                                                                                                                         | nothing (adds a prefix per line)              | 1                       |
-| extractText  | channel | Collapses whitespace and flattens newlines.                     | Text extracted from a PDF or a rendered page. Same effect as collapseWs plus layout loss.                                                                                                        | the whitespace channel, completely            | 1                       |
-| findReplace  | channel | Terminology find-and-replace across the document.               | Rebranding, or a style guide applied late. Destroys carriers wherever it rewrites, leaves the rest.                                                                                              | carriers inside replaced spans                | 0.5 / 1                 |
-| midExcerpt   | channel | Keeps a slice from the middle; neither end survives.            | Someone quoting two paragraphs out of ten. The hardest excerpt case, because header-at-the-start schemes lose their header.                                                                      | both ends                                     | 0.5 / 0.25              |
-| nfkc         | channel | Unicode NFKC normalisation.                                     | Search, identifier handling and many security filters normalise. The reason spab runs apostrophe and hyphen channels at all: they are NFKC-durable where whitespace is not.                      | whitespace variants; confusables SURVIVE      | 1                       |
-| reflow       | channel | Re-wraps the text to a different line width.                    | A formatter or a narrower viewport. Total loss for whitespace carriers is the expected result, not a defect.                                                                                     | the whitespace channel, completely            | 1                       |
-| reorder      | channel | Swaps two sentences.                                            | An editor moving a paragraph. Every character survives but the sequence changes, which is fatal to position-dependent schemes and survivable for self-locating ones.                             | carrier ORDER, not count                      | 1                       |
-| smartQuotes  | channel | Autocorrects straight quotes toward curly.                      | Word processors and some editors do it as you type. The mirror image of NFKC — it kills the channel NFKC spares.                                                                                 | the apostrophe channel; ws and hyphen survive | 0.5 / 1                 |
-| stripMd      | channel | Removes markdown emphasis markers.                              | A renderer or plain-text export. Changes character count without touching whitespace variants.                                                                                                   | nothing directly                              | 1                       |
-| tokenize     | channel | Splits on whitespace and rejoins with single spaces.            | A search index, or a naive normaliser in a data pipeline.                                                                                                                                        | the whitespace channel, completely            | 1                       |
-| trimLines    | channel | Strips trailing whitespace from every line.                     | Most editors do this on save, and many linters enforce it. Harmless to spab because its carriers sit BETWEEN words, not at line ends — which is why the carrier was chosen there.                | trailing whitespace only                      | 1                       |
-| truncate     | channel | Keeps a leading fraction of the document.                       | A preview, a snippet, or a length limit.                                                                                                                                                         | everything past the cut                       | 0.75 / 0.5 / 0.25       |
-| truncTail    | channel | Keeps a trailing fraction — the mirror of truncate.             | Included because head-only truncation flatters any scheme that front-loads its payload. Measuring only one direction was a real bias in an earlier version of this suite.                        | everything before the cut                     | 0.75 / 0.5 / 0.25       |
-| typos        | channel | Per-word character typo — drop, double or transpose a letter.   | Human editing. Local damage that leaves most of the document intact.                                                                                                                             | carriers adjacent to edits                    | 0.05 / 0.15 / 0.3       |
-| fullStrip    | attack  | Replaces every carrier variant with its default form.           | An adversary who knows the scheme. Total loss is the correct and expected outcome; it is listed so the table is honest about it rather than omitting the case.                                   | every substitution carrier                    | 1                       |
-| normalize    | attack  | Collapses a fraction of carrier variants back to a plain space. | A partial or careless normaliser. Harder than full normalisation for a block-structured modem, because a little damage is spread across many blocks rather than destroying the channel outright. | a fraction of whitespace carriers             | 0.1 / 0.25 / 0.5 / 0.75 |
-| regexAttack  | attack  | Targeted erasure of a chosen subset of carrier symbols.         | An informed adversary who knows the alphabet. spab does not claim resistance to deliberate removal, and this model is here to measure the cost of that, not to pass.                             | a targeted subset of variants                 | 0.34 / 0.67 / 1         |
-| saltPepper   | attack  | Randomly substitutes individual carrier characters.             | Someone perturbing the document without knowing the scheme. Scattered damage, which repetition handles well and block-structured codes handle badly.                                             | carriers at random                            | 0.05 / 0.1 / 0.2 / 0.4  |
-| stripZw      | attack  | Removes all invisible characters.                               | A sanitiser, a paste filter, or an anti-steganography scrub. Total loss for zero-width schemes; substitution carriers are untouched.                                                             | zero-width carriers, completely               | 1                       |
-| wordDelete   | attack  | Deletes words at random.                                        | Editing, or an attacker shifting every downstream symbol. The classic insertion/deletion channel: redundancy alone does not help, because every copy shifts together.                            | carrier COUNT (desynchronises)                | 0.05 / 0.1 / 0.2        |
-| wordInsert   | attack  | Inserts words at random.                                        | The mirror of wordDelete, and equally desynchronising.                                                                                                                                           | carrier COUNT (desynchronises)                | 0.05 / 0.1 / 0.2        |
-| zwNoise      | attack  | Randomly substitutes zero-width characters for one another.     | A filter that rewrites rather than removes invisibles.                                                                                                                                           | zero-width carriers, partially                | 0.1 / 0.3               |
+| model         | kind    | what it does                                                                       | what it stands in for                                                                                                                                                                                                                                                                                                                                        | damages                                          | intensities             |
+|---------------|---------|------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------|-------------------------|
+| jsonTrip      | control | Serialises the text into a JSON string and parses it back.                         | Every API boundary does this. It must be lossless, so a failure here means the codec is broken, not that the channel is hostile.                                                                                                                                                                                                                             | nothing                                          | 1                       |
+| blockErasure  | channel | Retypes a contiguous span, destroying its carriers.                                | A paragraph rewritten by hand. Burst damage rather than scattered.                                                                                                                                                                                                                                                                                           | a contiguous run of carriers                     | 0.1 / 0.25 / 0.5        |
+| collapseWs    | channel | Collapses every run of whitespace to a single plain space.                         | Pasting into a plain-text field, an HTML renderer, or anything that normalises spacing. This is the single commonest way a whitespace watermark dies.                                                                                                                                                                                                        | the whitespace channel, completely               | 1                       |
+| concat        | channel | Pastes the marked text into the middle of a larger document.                       | A quoted passage inside a report. Carriers are gained rather than lost, which desynchronises any scheme that keys placement to the total.                                                                                                                                                                                                                    | carrier count (adds sites at both ends)          | 1                       |
+| cutPaste      | channel | Copies a portion out to a new document.                                            | Ordinary quoting. Differs from truncate in that the span can start anywhere.                                                                                                                                                                                                                                                                                 | everything outside the copied span               | 0.75 / 0.5 / 0.25       |
+| emailQuote    | channel | Prefixes every line with "> ", as a reply quote does.                              | Replying to an email. Adds characters but leaves inter-word gaps intact.                                                                                                                                                                                                                                                                                     | nothing (adds a prefix per line)                 | 1                       |
+| extractText   | channel | Collapses whitespace and flattens newlines.                                        | Text extracted from a PDF or a rendered page. Same effect as collapseWs plus layout loss.                                                                                                                                                                                                                                                                    | the whitespace channel, completely               | 1                       |
+| findReplace   | channel | Terminology find-and-replace across the document.                                  | Rebranding, or a style guide applied late. Destroys carriers wherever it rewrites, leaves the rest.                                                                                                                                                                                                                                                          | carriers inside replaced spans                   | 0.5 / 1                 |
+| midExcerpt    | channel | Keeps a slice from the middle; neither end survives.                               | Someone quoting two paragraphs out of ten. The hardest excerpt case, because header-at-the-start schemes lose their header.                                                                                                                                                                                                                                  | both ends                                        | 0.5 / 0.25              |
+| nfkc          | channel | Unicode NFKC normalisation.                                                        | Search, identifier handling and many security filters normalise. The reason spab runs apostrophe and hyphen channels at all: they are NFKC-durable where whitespace is not.                                                                                                                                                                                  | whitespace variants; confusables SURVIVE         | 1                       |
+| reflow        | channel | Re-wraps the text to a different line width.                                       | A formatter or a narrower viewport. Total loss for whitespace carriers is the expected result, not a defect.                                                                                                                                                                                                                                                 | the whitespace channel, completely               | 1                       |
+| reorder       | channel | Swaps two sentences.                                                               | An editor moving a paragraph. Every character survives but the sequence changes, which is fatal to position-dependent schemes and survivable for self-locating ones.                                                                                                                                                                                         | carrier ORDER, not count                         | 1                       |
+| sanitisePaste | channel | Collapses every whitespace run to one space AND removes every invisible character. | A rich-text editor, an HTML renderer, or a CMS paste filter. Both destructions arrive together in real software, and testing them separately flatters both carrier families: a whitespace scheme sails through stripZw, an insertion scheme sails through collapseWs, and neither number describes a pipeline that does both. This row is the one that does. | BOTH whitespace carriers and zero-width carriers | 1                       |
+| smartQuotes   | channel | Autocorrects straight quotes toward curly.                                         | Word processors and some editors do it as you type. The mirror image of NFKC — it kills the channel NFKC spares.                                                                                                                                                                                                                                             | the apostrophe channel; ws and hyphen survive    | 0.5 / 1                 |
+| stripMd       | channel | Removes markdown emphasis markers.                                                 | A renderer or plain-text export. Changes character count without touching whitespace variants.                                                                                                                                                                                                                                                               | nothing directly                                 | 1                       |
+| tokenize      | channel | Splits on whitespace and rejoins with single spaces.                               | A search index, or a naive normaliser in a data pipeline.                                                                                                                                                                                                                                                                                                    | the whitespace channel, completely               | 1                       |
+| trimLines     | channel | Strips trailing whitespace from every line.                                        | Most editors do this on save, and many linters enforce it. Harmless to spab because its carriers sit BETWEEN words, not at line ends — which is why the carrier was chosen there.                                                                                                                                                                            | trailing whitespace only                         | 1                       |
+| truncate      | channel | Keeps a leading fraction of the document.                                          | A preview, a snippet, or a length limit.                                                                                                                                                                                                                                                                                                                     | everything past the cut                          | 0.75 / 0.5 / 0.25       |
+| truncTail     | channel | Keeps a trailing fraction — the mirror of truncate.                                | Included because head-only truncation flatters any scheme that front-loads its payload. Measuring only one direction was a real bias in an earlier version of this suite.                                                                                                                                                                                    | everything before the cut                        | 0.75 / 0.5 / 0.25       |
+| typos         | channel | Per-word character typo — drop, double or transpose a letter.                      | Human editing. Local damage that leaves most of the document intact.                                                                                                                                                                                                                                                                                         | carriers adjacent to edits                       | 0.05 / 0.15 / 0.3       |
+| fullStrip     | attack  | Replaces every carrier variant with its default form.                              | An adversary who knows the scheme. Total loss is the correct and expected outcome; it is listed so the table is honest about it rather than omitting the case.                                                                                                                                                                                               | every substitution carrier                       | 1                       |
+| normalize     | attack  | Collapses a fraction of carrier variants back to a plain space.                    | A partial or careless normaliser. Harder than full normalisation for a block-structured modem, because a little damage is spread across many blocks rather than destroying the channel outright.                                                                                                                                                             | a fraction of whitespace carriers                | 0.1 / 0.25 / 0.5 / 0.75 |
+| regexAttack   | attack  | Targeted erasure of a chosen subset of carrier symbols.                            | An informed adversary who knows the alphabet. spab does not claim resistance to deliberate removal, and this model is here to measure the cost of that, not to pass.                                                                                                                                                                                         | a targeted subset of variants                    | 0.34 / 0.67 / 1         |
+| saltPepper    | attack  | Randomly substitutes individual carrier characters.                                | Someone perturbing the document without knowing the scheme. Scattered damage, which repetition handles well and block-structured codes handle badly.                                                                                                                                                                                                         | carriers at random                               | 0.05 / 0.1 / 0.2 / 0.4  |
+| stripZw       | attack  | Removes all invisible characters.                                                  | A sanitiser, a paste filter, or an anti-steganography scrub. Total loss for zero-width schemes; substitution carriers are untouched.                                                                                                                                                                                                                         | zero-width carriers, completely                  | 1                       |
+| wordDelete    | attack  | Deletes words at random.                                                           | Editing, or an attacker shifting every downstream symbol. The classic insertion/deletion channel: redundancy alone does not help, because every copy shifts together.                                                                                                                                                                                        | carrier COUNT (desynchronises)                   | 0.05 / 0.1 / 0.2        |
+| wordInsert    | attack  | Inserts words at random.                                                           | The mirror of wordDelete, and equally desynchronising.                                                                                                                                                                                                                                                                                                       | carrier COUNT (desynchronises)                   | 0.05 / 0.1 / 0.2        |
+| zwNoise       | attack  | Randomly substitutes zero-width characters for one another.                        | A filter that rewrites rather than removes invisibles.                                                                                                                                                                                                                                                                                                       | zero-width carriers, partially                   | 0.1 / 0.3               |
 
 ## 1. Capacity
 
@@ -107,70 +108,72 @@ results are grouped by the redundancy actually achieved.
 
 ### Default carriers (ws + apos + hyphen)
 
-| model        | intensity | 1 copy |  2-4 |  5-8 |   9+ |
-|--------------|----------:|-------:|-----:|-----:|-----:|
-| findReplace  |         1 |   100% | 100% | 100% | 100% |
-| jsonTrip     |         1 |   100% | 100% | 100% | 100% |
-| smartQuotes  |         1 |   100% | 100% | 100% | 100% |
-| stripMd      |         1 |   100% | 100% | 100% | 100% |
-| stripZw      |         1 |   100% | 100% | 100% | 100% |
-| trimLines    |         1 |   100% | 100% | 100% | 100% |
-| typos        |      0.15 |   100% | 100% | 100% | 100% |
-| zwNoise      |       0.3 |   100% | 100% | 100% | 100% |
-| concat       |         1 |    88% | 100% | 100% | 100% |
-| reorder      |         1 |    65% |  82% | 100% |  95% |
-| emailQuote   |         1 |    65% |  72% |  74% |  83% |
-| blockErasure |      0.25 |     0% |  82% | 100% |  82% |
-| truncate     |       0.5 |     0% |  85% | 100% |  72% |
-| truncTail    |       0.5 |     0% |  59% | 100% |  72% |
-| cutPaste     |       0.5 |     0% |  38% | 100% |  70% |
-| saltPepper   |       0.2 |     0% |   8% |  53% |  48% |
-| midExcerpt   |      0.25 |     0% |   0% |  53% |  50% |
-| wordInsert   |       0.1 |     0% |   0% |  16% |  27% |
-| collapseWs   |         1 |     0% |   0% |  16% |  10% |
-| extractText  |         1 |     0% |   0% |  16% |  10% |
-| fullStrip    |         1 |     0% |   0% |  16% |  10% |
-| nfkc         |         1 |     0% |   0% |  16% |  10% |
-| reflow       |         1 |     0% |   0% |  16% |  10% |
-| regexAttack  |      0.67 |     0% |   0% |  16% |  10% |
-| tokenize     |         1 |     0% |   0% |  16% |  10% |
-| normalize    |       0.5 |     0% |   0% |  11% |   2% |
-| wordDelete   |       0.1 |     0% |   0% |   0% |   6% |
+| model         | intensity | 1 copy |  2-4 |  5-8 |   9+ |
+|---------------|----------:|-------:|-----:|-----:|-----:|
+| findReplace   |         1 |   100% | 100% | 100% | 100% |
+| jsonTrip      |         1 |   100% | 100% | 100% | 100% |
+| smartQuotes   |         1 |   100% | 100% | 100% | 100% |
+| stripMd       |         1 |   100% | 100% | 100% | 100% |
+| stripZw       |         1 |   100% | 100% | 100% | 100% |
+| trimLines     |         1 |   100% | 100% | 100% | 100% |
+| typos         |      0.15 |   100% | 100% | 100% | 100% |
+| zwNoise       |       0.3 |   100% | 100% | 100% | 100% |
+| concat        |         1 |    88% | 100% | 100% |  95% |
+| reorder       |         1 |    65% |  82% | 100% |  98% |
+| emailQuote    |         1 |    65% |  72% |  76% |  79% |
+| blockErasure  |      0.25 |     0% |  82% |  80% |  93% |
+| truncate      |       0.5 |     0% |  85% |  76% |  78% |
+| truncTail     |       0.5 |     0% |  59% |  76% |  73% |
+| cutPaste      |       0.5 |     0% |  38% |  76% |  63% |
+| midExcerpt    |      0.25 |     0% |   0% |  40% |  51% |
+| saltPepper    |       0.2 |     0% |   8% |  40% |  43% |
+| wordInsert    |       0.1 |     0% |   0% |  12% |  18% |
+| collapseWs    |         1 |     0% |   0% |  12% |  10% |
+| extractText   |         1 |     0% |   0% |  12% |  10% |
+| fullStrip     |         1 |     0% |   0% |  12% |  10% |
+| nfkc          |         1 |     0% |   0% |  12% |  10% |
+| reflow        |         1 |     0% |   0% |  12% |  10% |
+| regexAttack   |      0.67 |     0% |   0% |  12% |  10% |
+| sanitisePaste |         1 |     0% |   0% |  12% |  10% |
+| tokenize      |         1 |     0% |   0% |  12% |  10% |
+| normalize     |       0.5 |     0% |   0% |  12% |   8% |
+| wordDelete    |       0.1 |     0% |   0% |   0% |   6% |
 
 Read a row across, not down: a model at 0% / 100% is not unreliable, it is a
 model that needs redundancy and gets it once the passage is long enough.
 
 ### By carrier set (all redundancy bands pooled)
 
-| model        | default | ws-only | wsdense | zero-width |
-|--------------|--------:|--------:|--------:|-----------:|
-| blockErasure |     68% |     67% |     77% |       100% |
-| collapseWs   |      7% |      0% |      0% |       100% |
-| concat       |     98% |     98% |     98% |       100% |
-| cutPaste     |     53% |     53% |     35% |        78% |
-| emailQuote   |     76% |     75% |     72% |       100% |
-| extractText  |      7% |      0% |      0% |       100% |
-| findReplace  |    100% |    100% |    100% |       100% |
-| fullStrip    |      7% |      0% |      0% |       100% |
-| jsonTrip     |    100% |    100% |    100% |       100% |
-| midExcerpt   |     30% |     29% |     23% |        60% |
-| nfkc         |      7% |      0% |      0% |       100% |
-| normalize    |      2% |      0% |      7% |       100% |
-| reflow       |      7% |      0% |      0% |       100% |
-| regexAttack  |      7% |      0% |      1% |       100% |
-| reorder      |     87% |     87% |     90% |        95% |
-| saltPepper   |     31% |     25% |     59% |       100% |
-| smartQuotes  |    100% |    100% |    100% |       100% |
-| stripMd      |    100% |    100% |    100% |       100% |
-| stripZw      |    100% |    100% |    100% |         0% |
-| tokenize     |      7% |      0% |      0% |       100% |
-| trimLines    |    100% |    100% |    100% |       100% |
-| truncate     |     64% |     63% |     69% |        85% |
-| truncTail    |     58% |     57% |     38% |        78% |
-| typos        |    100% |    100% |    100% |        74% |
-| wordDelete   |      3% |      3% |      4% |        66% |
-| wordInsert   |     15% |      9% |      1% |       100% |
-| zwNoise      |    100% |    100% |    100% |         1% |
+| model         | default | ws-only | wsdense | zero-width |
+|---------------|--------:|--------:|--------:|-----------:|
+| blockErasure  |     74% |     74% |     77% |       100% |
+| collapseWs    |      7% |      0% |      0% |       100% |
+| concat        |     95% |     95% |     94% |       100% |
+| cutPaste      |     50% |     50% |     32% |        60% |
+| emailQuote    |     75% |     74% |     69% |       100% |
+| extractText   |      7% |      0% |      0% |       100% |
+| findReplace   |    100% |    100% |    100% |       100% |
+| fullStrip     |      7% |      0% |      0% |       100% |
+| jsonTrip      |    100% |    100% |    100% |       100% |
+| midExcerpt    |     32% |     31% |     19% |        50% |
+| nfkc          |      7% |      0% |      0% |       100% |
+| normalize     |      6% |      0% |     10% |       100% |
+| reflow        |      7% |      0% |      0% |       100% |
+| regexAttack   |      7% |      0% |      2% |       100% |
+| reorder       |     90% |     90% |     89% |        96% |
+| saltPepper    |     29% |     24% |     63% |       100% |
+| sanitisePaste |      7% |      0% |      0% |         0% |
+| smartQuotes   |    100% |    100% |    100% |       100% |
+| stripMd       |    100% |    100% |    100% |       100% |
+| stripZw       |    100% |    100% |    100% |         0% |
+| tokenize      |      7% |      0% |      0% |       100% |
+| trimLines     |    100% |    100% |    100% |       100% |
+| truncate      |     66% |     66% |     72% |        85% |
+| truncTail     |     59% |     59% |     33% |        67% |
+| typos         |    100% |    100% |    100% |        71% |
+| wordDelete    |      3% |      4% |      3% |        62% |
+| wordInsert    |     11% |      4% |      1% |       100% |
+| zwNoise       |    100% |    100% |    100% |         3% |
 
 `zero-width` wins most rows because it inserts rather than substitutes, so it
 reaches high copy counts on any passage — and loses every row where invisible
@@ -184,16 +187,16 @@ the same average.
 
 | model        | intensities             | meaning                            |   lo |      |      | hi |
 |--------------|-------------------------|------------------------------------|-----:|-----:|-----:|---:|
-| saltPepper   | 0.05 / 0.1 / 0.2 / 0.4  | p = per-carrier random substitutio |  64% |  56% |  31% | 9% |
-| normalize    | 0.1 / 0.25 / 0.5 / 0.75 | p = per-carrier collapse to space  |  47% |   9% |   2% | 6% |
-| blockErasure | 0.1 / 0.25 / 0.5        | frac = size of retyped span        |  78% |  68% |  56% |    |
-| cutPaste     | 0.75 / 0.5 / 0.25       | keepFrac = portion copied          |  67% |  53% |  29% |    |
-| truncate     | 0.75 / 0.5 / 0.25       | keepFrac = head kept               |  81% |  64% |  38% |    |
-| wordDelete   | 0.05 / 0.1 / 0.2        | p = per-word deletion (desync)     |  18% |   3% |   0% |    |
-| wordInsert   | 0.05 / 0.1 / 0.2        | p = per-gap insertion (desync)     |  26% |  15% |   9% |    |
+| saltPepper   | 0.05 / 0.1 / 0.2 / 0.4  | p = per-carrier random substitutio |  67% |  59% |  29% | 8% |
+| normalize    | 0.1 / 0.25 / 0.5 / 0.75 | p = per-carrier collapse to space  |  50% |   7% |   6% | 7% |
+| blockErasure | 0.1 / 0.25 / 0.5        | frac = size of retyped span        |  82% |  74% |  59% |    |
+| cutPaste     | 0.75 / 0.5 / 0.25       | keepFrac = portion copied          |  67% |  50% |  29% |    |
+| truncate     | 0.75 / 0.5 / 0.25       | keepFrac = head kept               |  85% |  66% |  41% |    |
+| wordDelete   | 0.05 / 0.1 / 0.2        | p = per-word deletion (desync)     |  16% |   3% |   0% |    |
+| wordInsert   | 0.05 / 0.1 / 0.2        | p = per-gap insertion (desync)     |  23% |  11% |   7% |    |
 | regexAttack  | 0.34 / 0.67 / 1         | channel noise: targeted partial er |   6% |   7% |   7% |    |
 | typos        | 0.05 / 0.15 / 0.3       | p = per-word character typo (drop  | 100% | 100% | 100% |    |
-| truncTail    | 0.75 / 0.5 / 0.25       | keepFrac = TAIL kept (mirror of tr |  71% |  58% |  32% |    |
+| truncTail    | 0.75 / 0.5 / 0.25       | keepFrac = TAIL kept (mirror of tr |  75% |  59% |  36% |    |
 
 ## 5. Safety
 
@@ -203,9 +206,9 @@ come back as something else, and unmarked text must never yield a payload.
 | measurement                         |     result | requirement            |
 |-------------------------------------|-----------:|------------------------|
 | payload reported from unmarked text |    0 / 100 | must be 0              |
-| wrong payload from a damaged mark   |   0 / 1836 | must be 0              |
-| recovered at worst-case intensity   | 1062 (58%) | reported, not required |
-| lost at worst-case intensity        |  774 (42%) | reported, not required |
+| wrong payload from a damaged mark   |   0 / 1904 | must be 0              |
+| recovered at worst-case intensity   | 1062 (56%) | reported, not required |
+| lost at worst-case intensity        |  842 (44%) | reported, not required |
 
 ## 6. Cost and distortion
 
@@ -219,7 +222,7 @@ every other untouched site.
 | ws-only    | whitespace alone               |      - |      - |          - |          - |
 | punct      | NFKC-durable only              |      - |      - |          - |          - |
 | wsdense    | 8 variants, 3 bits/site        |      - |      - |          - |          - |
-| zero-width | inserts, not length-preserving | 0.02ms | 0.02ms |       556% | +204 chars |
+| zero-width | inserts, not length-preserving | 0.03ms | 0.02ms |       556% | +204 chars |
 
 ---
 

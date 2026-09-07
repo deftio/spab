@@ -289,44 +289,154 @@
     for (var j = 0; j < K; j++) r[j] = g() & 0xff; // repair
     return r;
   }
-  function rlncValue(source, esi) { var K = source.length, c = rlncCoeffs(esi, K), v = 0; for (var j = 0; j < K; j++) v ^= gmul(c[j], source[j]); return v; }
   // Solve for the K source bytes from packets [{esi,val}]; null if under-rank.
-  function rlncSolve(packets, K) {
-    var m = [];
-    for (var p = 0; p < packets.length; p++) { var row = Array.from(rlncCoeffs(packets[p].esi, K)); row.push(packets[p].val); m.push(row); }
-    var nrow = m.length, prow = 0;
+  // ---- why there is no repeat schedule --------------------------------------
+  //
+  // Tried and measured, because the intuition is compelling: if repetition fits four
+  // copies of the payload, a fountain emitting several copies of each symbol ought to
+  // beat it. It does not, and the reason is worth keeping.
+  //
+  // Emitting each equation several times means the decoder needs EVERY equation in
+  // the set to survive at least once. Emitting all-distinct equations means it needs
+  // ANY K of them. The second condition is strictly weaker, so all-distinct wins:
+  //
+  //   saltPepper p=0.1, one channel:
+  //     all-distinct   27 equations recovered, 0 wrong
+  //     repeat + vote  10 equations recovered, 0 wrong   <- fewer to choose from
+  //
+  //   paired recovery over 27 damage models:
+  //     rlnc all-distinct  57%      rlnc repeat + vote  56%
+  //
+  // Bit-level voting across copies was implemented too, and it was not the problem:
+  // it produced no wrong packets at all. It simply had nothing to add, because a
+  // packet that passes its own checksum is already better evidence than a vote.
+  //
+  // So the fountain ALREADY subsumes what repetition gains from copies. The remaining
+  // gap (57% against repetition's 60%) is not a shortage of copies: it is that a
+  // damaged packet is discarded whole, where repetition's per-bit majority salvages a
+  // partially damaged one. Closing it needs an INNER CODE so a packet with a bit
+  // error is repaired rather than thrown away. See dev/roadmap.md.
+
+  // ---- RLNC packet geometry ------------------------------------------------
+  //
+  // A fountain packet is [esi][data][crc]. All three are bit fields; only `data`
+  // must be a whole number of bytes, because that is what GF(256) operates on.
+  //
+  // PACKET WIDTH IS NOT A FREE PARAMETER. The mixed-radix modem groups carrier sites
+  // into 32-bit blocks and the resync sweep re-cuts that grid one site at a time, so
+  // a packet wider than a block is far harder to realign after an insertion or
+  // deletion. Measured on desync damage: 32-bit packets recover 20%, 40-bit 1%,
+  // 64-bit 3%, 96-bit 0%. Widening the packet to buy efficiency costs the failure
+  // mode redundancy cannot fix.
+  //
+  // So the win is a better SPLIT of the same 32 bits, not a wider packet. The
+  // original spent 16 bits on an esi that never exceeds a few hundred and 8 on the
+  // check, leaving 8 for payload. esi:8 doubles the payload at identical width:
+  //
+  //   geometry     width  payload  desync  other damage  paired overall
+  //   16/8/8        32b     25%      20%       46%           48%
+  //   8/16/8        32b     50%      15%       63%           56%   <- default
+  //   16/32/16      64b     50%       3%       50%           53%
+  //   12/128/16    156b     82%       0%       44%           43%
+  //
+  // (repetition scores 60% on the same paired set.)
+  //
+  // The 8-bit esi holds 256 equations, which a long document can exhaust; encode
+  // bounds the count rather than wrapping into colliding ids. Source blocking is the
+  // real fix and is tracked in dev/roadmap.md.
+  var RLNC_PRESETS = {
+    // name        esi  data  crc     width  payload
+    'v1':        { esi: 16, sym: 1, crc: 8 },    // 32b   25%   the original
+    'default':   { esi: 8,  sym: 2, crc: 8 },    // 32b   50%   same width, double payload
+    'wide':      { esi: 16, sym: 4, crc: 16 },   // 64b   50%   two blocks
+    'widest':    { esi: 12, sym: 16, crc: 16 }   // 156b  82%   efficiency at any cost
+  };
+  var RLNC_DEFAULT = 'default';
+
+  function rlncGeom(name) {
+    var g = RLNC_PRESETS[name] || RLNC_PRESETS[RLNC_DEFAULT];
+    return { sym: g.sym, esiBits: g.esi, crcBits: g.crc };
+  }
+  function geomBits(g) { return g.esiBits + g.sym * 8 + g.crcBits; }
+  // The check covers the ESI and the data, truncated to crcBits. Truncating a CRC
+  // weakens it exactly as much as the bits dropped, which is the intended trade.
+  function geomCrcVal(esi, vals, g) {
+    var bytes = [PKT_SEED, (esi >> 8) & 0xff, esi & 0xff].concat(vals);
+    var c = g.crcBits <= 8 ? crc8(bytes) : crc16(bytes);
+    return c & ((1 << g.crcBits) - 1);
+  }
+  // Split the packet bytes into K source symbols of g.sym bytes, zero-padded.
+  function rlncSource(frame, g) {
+    var K = Math.ceil(frame.length / g.sym), out = [];
+    for (var i = 0; i < K; i++) {
+      var sym = [];
+      for (var j = 0; j < g.sym; j++) sym.push(frame[i * g.sym + j] || 0);
+      out.push(sym);
+    }
+    return out;
+  }
+  function rlncValueV(source, esi, g) {
+    var K = source.length, c = rlncCoeffs(esi, K), v = new Array(g.sym), j, i;
+    for (j = 0; j < g.sym; j++) v[j] = 0;
+    for (i = 0; i < K; i++) if (c[i]) for (j = 0; j < g.sym; j++) v[j] ^= gmul(c[i], source[i][j]);
+    return v;
+  }
+  function packetBitsV(esi, vals, g) {
+    var w = new BitWriter();
+    w.u(esi, g.esiBits);
+    for (var i = 0; i < g.sym; i++) w.u(vals[i] & 0xff, 8);
+    w.u(geomCrcVal(esi, vals, g), g.crcBits);
+    return w.bits;
+  }
+  function parsePacketsV(bits, g) {
+    var w = geomBits(g), out = [], np = Math.floor(bits.length / w);
+    for (var p = 0; p < np; p++) {
+      var r = new BitReader(bits, p * w);
+      var esi = r.u(g.esiBits);
+      var vals = [];
+      for (var i = 0; i < g.sym; i++) vals.push(r.u(8));
+      var got = r.u(g.crcBits);
+      if (got !== geomCrcVal(esi, vals, g)) continue;
+      out.push({ esi: esi, val: vals });
+    }
+    return out;
+  }
+  // Gaussian elimination with a VECTOR right-hand side: K coefficient columns
+  // followed by symLen value columns, eliminated once rather than per byte.
+  function rlncSolveV(packets, K, symLen) {
+    var m = [], p, j, i;
+    for (p = 0; p < packets.length; p++) {
+      var row = Array.from(rlncCoeffs(packets[p].esi, K));
+      for (j = 0; j < symLen; j++) row.push(packets[p].val[j]);
+      m.push(row);
+    }
+    var nrow = m.length, prow = 0, W = K + symLen;
     for (var col = 0; col < K && prow < nrow; col++) {
-      var piv = -1; for (var i = prow; i < nrow; i++) if (m[i][col] !== 0) { piv = i; break; }
+      var piv = -1;
+      for (i = prow; i < nrow; i++) if (m[i][col] !== 0) { piv = i; break; }
       if (piv < 0) continue; // cov-ignore: rank-deficient column; distinct-ESI packets give independent rows
       var t = m[prow]; m[prow] = m[piv]; m[piv] = t;
       var invp = ginv(m[prow][col]);
-      for (var j = 0; j <= K; j++) m[prow][j] = gmul(m[prow][j], invp);
-      for (i = 0; i < nrow; i++) if (i !== prow && m[i][col] !== 0) { var f = m[i][col]; for (j = 0; j <= K; j++) m[i][j] ^= gmul(f, m[prow][j]); }
+      for (j = 0; j < W; j++) m[prow][j] = gmul(m[prow][j], invp);
+      for (i = 0; i < nrow; i++) if (i !== prow && m[i][col] !== 0) {
+        var f = m[i][col];
+        for (j = 0; j < W; j++) m[i][j] ^= gmul(f, m[prow][j]);
+      }
       prow++;
     }
-    if (prow < K) return null; // cov-ignore: under-rank system; unreachable with genuine distinct-ESI packets
-    var out = new Uint8Array(K);
-    for (i = 0; i < nrow; i++) { var lead = -1, cnt = 0; for (j = 0; j < K; j++) if (m[i][j] !== 0) { lead = j; cnt++; } if (cnt === 1) out[lead] = m[i][K]; }
-    return out;
-  }
-  // Packet = [esiHi][esiLo][val][crc] = 32 bits. CRC is seeded with a constant so an
-  // all-zero (blank/erased) packet does NOT validate — the "zero is a valid codeword" trap.
-  function packetCrc(b) { return crc8([PKT_SEED, b[0], b[1], b[2]]); }
-  function packetBits(esi, val) {
-    var bytes = [(esi >> 8) & 0xff, esi & 0xff, val & 0xff];
-    bytes.push(packetCrc(bytes));
-    var bits = []; for (var k = 0; k < 4; k++) for (var i = 7; i >= 0; i--) bits.push((bytes[k] >> i) & 1);
-    return bits;
-  }
-  function parsePackets(bits) {
-    var out = []; var np = Math.floor(bits.length / 32);
-    for (var p = 0; p < np; p++) {
-      var b = [0, 0, 0, 0];
-      for (var k = 0; k < 4; k++) { var v = 0; for (var i = 0; i < 8; i++) v = (v << 1) | bits[p * 32 + k * 8 + i]; b[k] = v; }
-      if (packetCrc(b) === b[3]) out.push({ esi: (b[0] << 8) | b[1], val: b[2] });
+    // Under-rank is unreachable with genuine distinct-ESI packets: a K below the
+    // truth still eliminates to full rank and fails the frame checksum instead, and a
+    // K above it is not attempted until enough packets exist.
+    if (prow < K) return null; // cov-ignore: see above
+    var out = new Uint8Array(K * symLen);
+    for (i = 0; i < nrow; i++) {
+      var lead = -1, cnt = 0;
+      for (j = 0; j < K; j++) if (m[i][j] !== 0) { lead = j; cnt++; }
+      if (cnt === 1) for (j = 0; j < symLen; j++) out[lead * symLen + j] = m[i][K + j];
     }
     return out;
   }
+
 
   // ---------- byte / bit helpers ----------
   function crc8(bytes) {
@@ -1192,7 +1302,11 @@
     });
     var frameBits = packet.bits;
     var frame = packet.bytes;
-    var K = frame.length; // RLNC source symbols (= packet bytes, padded to a byte boundary)
+    // RLNC source symbols. With the default 1-byte symbol this is one per packet
+    // byte, exactly as before; a larger params.rlncSymbol groups them.
+    var geom = rlncGeom(params.rlncGeom);
+    var rlncSrc = rlncSource(frame, geom);
+    var K = rlncSrc.length;
     var arr = cover.split('');
     var channels = {}, issues = [], primary = null;
     var esiBase = 0; // RLNC: channels emit DISJOINT esi ranges so their packets combine
@@ -1264,13 +1378,32 @@
       var bits, reps, tooShort;
 
       if (ecc === 'rlnc') {
-        // Fill capacity with self-checking/self-locating fountain packets (32 bits each),
-        // using a global esi so every channel carries distinct packets (they pool on decode).
-        var nPk = Math.floor(cap / 32);
+        // Fill capacity with self-checking/self-locating fountain packets, using a
+        // global esi so every channel carries distinct packets (they pool on decode).
+        var pw = geomBits(geom);
+        var nPk = Math.floor(cap / pw);
+        // The ESI is a fixed-width field and `esiBase` advances across carrier
+        // classes, so a long enough document runs out of distinct ids. Emitting past
+        // that point WRAPS, producing two different equations that claim the same
+        // esi — the pool keeps whichever arrives first and the solve is quietly
+        // wrong. Stop instead. Source blocking (a per-chunk id) is the real fix and
+        // is not needed until the cover exceeds roughly a quarter-million
+        // characters, which is a book; see dev/roadmap.md.
+        var esiSpace = (1 << geom.esiBits);
         tooShort = nPk < K;
         bits = [];
-        for (var e = 0; e < nPk; e++) { var esi = esiBase + e; bits = bits.concat(packetBits(esi, rlncValue(frame, esi))); }
-        esiBase += nPk;
+        // Emit distinct equations until the esi space runs out, then WRAP and emit
+        // them again. rlncCoeffs(esi, K) is a pure function, so esi 5 always encodes
+        // the same equation — a wrapped packet is an identical DUPLICATE, not a
+        // second equation claiming the same id. The decoder pools by esi and keeps
+        // the first valid copy, so a duplicate is simply a second chance at that
+        // equation. Capping the count instead would throw away capacity on exactly
+        // the documents that have the most of it to spare.
+        for (var e = 0; e < nPk; e++) {
+          var esi = (esiBase + e) % esiSpace;
+          bits = bits.concat(packetBitsV(esi, rlncValueV(rlncSrc, esi, geom), geom));
+        }
+        esiBase = (esiBase + nPk) % esiSpace;
         while (bits.length < cap) bits.push(0);
         bits = bits.slice(0, cap);
         reps = nPk;
@@ -1338,6 +1471,10 @@
         encrypted: packet.enc !== ENC.none,
         checksum: 'crc' + cksumBits(packet.cksum),
         checksumBits: cksumBits(packet.cksum),
+        rlncGeom: ecc === 'rlnc' ? (params.rlncGeom || RLNC_DEFAULT) : undefined,
+        rlncSymbolBytes: ecc === 'rlnc' ? geom.sym : undefined,
+        rlncPacketBits: ecc === 'rlnc' ? geomBits(geom) : undefined,
+        rlncK: ecc === 'rlnc' ? K : undefined,
         channels: channels,
         slots: pc.sites,             // back-compat: primary/strongest channel
         capacityBits: pc.capacityBits,
@@ -1422,7 +1559,7 @@
   // here, which is what the version field exists to make explicit rather than a
   // guess. That is a wire-format break and is why this is a minor bump.
   function frameToResult(bytes, extra, opts) {
-    // cov-ignore: rlncSolve always returns at least K ≥ 4 bytes
+    // cov-ignore: rlncSolveV always returns at least K x symbol bytes
     if (!bytes || bytes.length < 4) return Object.assign(notDetected(), extra);
     var f = parseFrameBits(bytesToBits(bytes), 0);
     if (!f) {
@@ -1494,10 +1631,14 @@
   // The requirement is K linearly INDEPENDENT equations, not merely K packets. The
   // systematic ESIs (0..K-1) are independent by construction; repair rows are random
   // over GF(256) and independent with overwhelming probability, but an arbitrary set
-  // of K rows is not guaranteed full rank. rlncSolve detects an under-rank system and
+  // of K rows is not guaranteed full rank. rlncSolveV detects an under-rank system and
   // returns null rather than a wrong answer, and callers should collect K + a few
   // repair packets rather than exactly K.
   function decodeRLNC(text, ids, key, maxSites, opts) {
+    // The geometry is not carried on the wire, so encode and decode must be given
+    // the same params.rlncSymbol — like ecc and classes. If it earns its keep it
+    // should move into the packet header rather than stay a shared assumption.
+    var geom = rlncGeom(opts && opts.rlncGeom);
     var pool = {}, count = 0;
 
     // Pool packets from one block-grid phase across every channel.
@@ -1505,7 +1646,7 @@
       ids.forEach(function (id) {
         var def = CLASS_DEFS[id], digits = classDigits(text, id);
         if (ph >= phaseCount(key, digits.length)) return;
-        parsePackets(phaseBits(digits, ph, def, key, id, maxSites)).forEach(function (pk) {
+        parsePacketsV(phaseBits(digits, ph, def, key, id, maxSites), geom).forEach(function (pk) {
           if (!(pk.esi in pool)) { pool[pk.esi] = pk.val; count++; }
         });
       });
@@ -1519,19 +1660,19 @@
     // sweep is held back until there is nothing to lose by trying it.
     addPhase(0);
     // K = source symbols = frame length = len + 3; get len from systematic packet esi=1 if clean.
+    // K is not carried anywhere, so it is guessed. K = ceil(packetBytes / symbol),
+    // and the packet's own header states its length once the solve succeeds — so a
+    // wrong K simply fails the packet checksum and the next candidate is tried.
+    // Solving for a K larger than the truth yields trailing padding, which
+    // parseFrameBits ignores because it reads the length from the header.
     function attempt() {
       var pk = Object.keys(pool).map(function (e) { return { esi: +e, val: pool[e] }; });
-      var cand = [];
-        // K = frame length = content length + framing. The length now lives in byte 3
-      // of the frame, so the systematic packet that carries it is esi 3, not 1.
-      if (3 in pool) cand.push(pool[3] + 5);
-      for (var Kg = 4; Kg <= 80; Kg++) if (cand.indexOf(Kg) < 0) cand.push(Kg);
-      for (var ci = 0; ci < cand.length; ci++) {
-        var K = cand[ci];
+      var maxK = Math.ceil(320 / geom.sym);
+      for (var K = Math.max(1, Math.ceil(4 / geom.sym)); K <= maxK; K++) {
         if (pk.length < K) continue;
-        var src = rlncSolve(pk, K);
-        if (!src) continue; // cov-ignore: pairs with rlncSolve's under-rank return (unreachable with genuine packets)
-        var res = frameToResult(src, { channel: 'rlnc', packets: count }, opts);
+        var src = rlncSolveV(pk, K, geom.sym);
+        if (!src) continue; // cov-ignore: under-rank; unreachable with genuine distinct-ESI packets
+        var res = frameToResult(Array.from(src), { channel: 'rlnc', packets: count }, opts);
         if (res.crcOk) return res;
       }
       return null;

@@ -267,27 +267,74 @@ is tuned for capacity, and capacity is not what is scarce in a long document. Wo
 proper sweep and probably a smaller default, or an adaptive one chosen from the
 cover's size.
 
-### RLNC symbol geometry — **open**
+### RLNC packet geometry — **done** (0.5.1)
 
-A coded packet is `[esiHi][esiLo][val][crc8]` — 32 bits to carry **one** source byte,
-against repetition's 8. That is a 4x capacity requirement, and it is a robustness
-problem rather than an efficiency one, because it decides whether RLNC can be used at
-all:
+The coded packet was `[esi:16][data:8][crc8]` — 32 bits to carry one byte, so three
+quarters of it overhead, with 16 bits of index for a value that never exceeded a few
+hundred.
+
+Now four named geometries via `params.rlncGeom`, defaulting to **`8/16/8`**: the same
+32-bit width, the same block alignment, the same check, and **twice the payload**.
+
+| geometry | width | payload | desync | other damage | paired overall |
+|---|--:|--:|--:|--:|--:|
+| `v1` (16/8/8) | 32b | 25% | 20% | 46% | 48% |
+| **`default` (8/16/8)** | **32b** | **50%** | 15% | **63%** | **56%** |
+| `wide` (16/32/16) | 64b | 50% | 3% | 50% | 53% |
+| `widest` | 156b | 82% | 0% | 44% | 43% |
+
+Repetition scores 60% on the same paired set, so most of the gap is closed.
+
+**Packet width is coupled to the modem, and this is the load-bearing finding.** The
+mixed-radix layer groups sites into 32-bit blocks and the resync sweep re-cuts that
+grid one site at a time, so a packet wider than a block cannot be realigned after an
+insertion or deletion. Desync recovery: 32-bit 20%, 40-bit 1%, 64-bit 3%, 96-bit 0%.
+Every wider geometry proposed during this work — 12/32/12, 12/32/16, 16/32/16 — bought
+efficiency with the one failure mode redundancy cannot fix. The win had to come from
+re-splitting 32 bits, not from more of them.
+
+**Esi wrapping.** Capacity beyond the distinct-equation space now emits duplicate
+packets rather than stopping. `rlncCoeffs(esi, K)` is pure, so a wrapped packet is an
+identical copy, not a conflicting equation, and the decoder keeps the first valid one.
+On a 200K-character cover this takes heavy-damage recovery from 60% to 80%. An earlier
+version of this work capped emission instead, on the mistaken belief that wrapping
+produced colliding equations.
+
+Still open here:
+
+* **The geometry is not signalled on the wire.** Encoder and decoder must be given the
+  same `rlncGeom`, like `ecc` and `classes`. It should move into the packet header.
+* **Source blocking** would let the esi stay narrow indefinitely. With wrapping it is
+  an optimisation rather than a correctness requirement.
+
+### Inner code for coded packets — **open, this is the one that matters**
+
+RLNC still trails repetition, 56% against 60%, and geometry is not why. **A damaged
+packet is discarded whole**, where repetition's per-bit majority salvages a partially
+damaged one. All-or-nothing loses to majority rule on a substitution channel:
 
 ```
-37-byte packet, 750 bits of cover capacity:
-  repetition  needs  296 bits ->  2 copies     decodes
-  rlnc        needs 1184 bits -> 23 packets    cannot reach K = 37
+P(packet survives) = (1 - p)^width
+  p=0.5%   32-bit packet  85%
+  p=2%     32-bit packet  52%
 ```
 
-This is very likely why the paired comparison has repetition beating RLNC 88% to 80%:
-RLNC is being measured where it cannot afford to compete. The fragmentation table
-under *Sliding histogram detector* shows the other half of the picture — on a stream
-cut into many pieces, RLNC recovers 50% where repetition manages 10%, because a
-32-bit coded packet fits inside a fragment that cannot hold a whole frame. Vector symbols — one ESI
-and one checksum amortised over 4, 8 or 16 coded bytes — would change the comparison,
-and the comparison should be re-run before drawing any conclusion about which code is
-better. Ties into **Decide RLNC's future** below.
+A short inner code per packet — Hamming, or a shortened BCH — would let a packet with
+a bit error be *repaired* rather than thrown away. That is the precondition for
+everything else: with it, wider packets become affordable and the geometry trade
+reverses; without it, they are a measured net loss.
+
+*Two negative results from 0.5.1, recorded so they are not rebuilt:*
+
+**A repeat schedule does not help.** If repetition fits four copies, a fountain
+emitting several copies of each equation ought to beat it. It does not: repeating
+means the decoder needs EVERY equation in the set to survive at least once, where
+all-distinct means it needs ANY K. Measured 56% against 57%. Note this is *not* an
+argument against wrapping, which only repeats after the distinct space is exhausted.
+
+**Bit-level voting across copies adds nothing.** Implemented and measured: it produced
+zero wrong packets, and had nothing to contribute, because a packet that passes its
+own checksum is already better evidence than a vote over copies.
 
 ### Packet admission hardening — **measured as a non-issue, do not spend on it yet**
 

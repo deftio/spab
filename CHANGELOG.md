@@ -54,8 +54,49 @@ Robustness release, on top of the v2 wire format shipped in 0.5.0.
   shifts every real digit after them. A joiner between two pictographic characters is
   now skipped. Found by the new corpus on its first run.
 
+### Changed
+
+- **The RLNC fountain packet is re-split: `8/16/8` replaces `16/8/8`.** The coded
+  packet spent 16 bits on an index that never exceeds a few hundred and 8 on its
+  check, leaving 8 for payload — three quarters overhead. The new default keeps the
+  same 32-bit width, block alignment and check strength, and **doubles the payload**.
+  Selectable via `params.rlncGeom` (`'v1' | 'default' | 'wide' | 'widest'`); encode
+  and decode must agree, as they must for `ecc` and `classes`.
+
+  | geometry | width | payload | desync | other damage | paired overall |
+  |---|--:|--:|--:|--:|--:|
+  | `v1` (16/8/8) | 32b | 25% | 20% | 46% | 48% |
+  | **`default` (8/16/8)** | **32b** | **50%** | 15% | **63%** | **56%** |
+  | `wide` (16/32/16) | 64b | 50% | 3% | 50% | 53% |
+  | `widest` | 156b | 82% | 0% | 44% | 43% |
+
+  Repetition scores 60% on the same paired set, so most of the gap closes. **Marks
+  written with `ecc: 'rlnc'` by 0.5.0 do not decode here** unless `rlncGeom: 'v1'` is
+  passed to both sides.
+
+  The finding underneath: **packet width is coupled to the modem.** The mixed-radix
+  layer groups carrier sites into 32-bit blocks and the resync sweep re-cuts that grid
+  one site at a time, so a packet wider than a block cannot be realigned after an
+  insertion or deletion — desync recovery falls from 20% at 32 bits to 1% at 40 and
+  0% at 96. Several wider geometries were built and measured before this was
+  understood; all of them bought efficiency with the one failure mode redundancy
+  cannot fix.
+- **Fountain packets now wrap past the end of the ESI space** rather than stopping.
+  `rlncCoeffs(esi, K)` is a pure function, so a wrapped packet is an identical
+  duplicate, not a second equation claiming the same id, and the decoder keeps the
+  first valid copy. Capacity beyond the distinct-equation space therefore buys
+  redundancy: on a 200,000-character cover this takes recovery under heavy scattered
+  damage from 60% to 80%. An earlier revision capped emission instead, on the mistaken
+  belief that wrapping produced colliding equations.
+
 ### Added
 
+- **The ECC layer is now specified** in `dev/wire-format.md` §9b. The document
+  described the packet and called itself a post-ECC format, but never said what is
+  actually written into the carrier stream — the repetition layout, the fountain
+  packet fields, the GF(2⁸) polynomial, the coefficient PRNG, the checksum seed, the
+  `esiBase` rule and the wrapping behaviour. A port cannot be bit-compatible without
+  them, so their absence was a gap rather than a scoping decision.
 - **A research measurement surface**, kept firmly apart from CI. `tests/` proves the
   implementation works with binary assertions that must never regress; `r_and_d/`
   measures how well it works, gates nothing, and every number there moves when the
@@ -169,6 +210,21 @@ Robustness release, on top of the v2 wire format shipped in 0.5.0.
 ### Measured and rejected
 
 Recorded because a negative result that is not written down gets rebuilt:
+
+- **A fountain repeat schedule.** If repetition fits four copies of the payload, a
+  fountain emitting several copies of each equation ought to beat it. It does not:
+  repeating means the decoder needs EVERY equation in the set to survive at least
+  once, where all-distinct means it needs ANY K of them — a strictly weaker condition.
+  Measured 56% against 57%. (This is not an argument against esi wrapping above, which
+  only repeats once the distinct space is genuinely exhausted.)
+- **Bit-level voting across packet copies.** Implemented alongside the schedule, and
+  it was not the problem: it produced zero wrong packets. It simply had nothing to
+  add, because a packet that passes its own checksum is already better evidence than a
+  majority vote over copies.
+- **Wider fountain packets** (12/32/12, 12/32/16, 16/32/16, and larger). All improve
+  efficiency and all lose desync recovery, because packet width is coupled to the
+  32-bit modem block. Kept as selectable geometries so the measurement is reproducible
+  and so the trade can be revisited once packets tolerate bit errors.
 
 - **Reliability-weighted voting.** Per-site confidence was used to down-weight blocks
   holding more ambiguous glyphs in the majority vote. It never helped and twice hurt

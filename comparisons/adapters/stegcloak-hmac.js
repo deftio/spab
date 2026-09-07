@@ -22,6 +22,11 @@ function instance() {
 }
 module.exports = {
   name: 'StegCloak (AES+HMAC)',
+  family: 'insertion',
+  lengthPreserving: false,
+  integrity: true,
+  bestFor: 'an invisible payload that must be confidential and tamper-evident',
+  vendor: 'KuroLabs',
   technique: 'zero-width insertion at one point; compress + optional encrypt + HMAC',
   url: 'https://github.com/KuroLabs/stegcloak',
   install: 'npm i stegcloak',

@@ -55,13 +55,13 @@ the number to weigh against the extra capacity in table 2.
 | cover chars | largest secret | copies | characters added | growth | encode/decode |
 |-------------|---------------:|-------:|-----------------:|-------:|--------------:|
 | 50          |            64B |     1x |       +448 chars |   896% |        0/0 ms |
-| 200         |           256B |     1x |      +2.0K chars |   992% |        0/0 ms |
-| 1K          |          1.0KB |     2x |     +10.0K chars |   998% |        2/3 ms |
-| 5K          |          4.1KB |     3x |     +49.3K chars |   987% |      20/17 ms |
-| 20K         |         16.4KB |     3x |    +197.3K chars |   987% |     119/70 ms |
-| 100K        |         16.4KB |     3x |    +203.6K chars |   204% |    110/108 ms |
-| 500K        |         16.4KB |     1x |         +0 chars |     0% |     118/35 ms |
-| 1M          |         16.4KB |     2x |         +0 chars |     0% |     152/68 ms |
+| 200         |           256B |     1x |      +2.0K chars |   992% |        1/1 ms |
+| 1K          |          1.0KB |     2x |     +10.0K chars |   998% |        4/7 ms |
+| 5K          |          4.1KB |     3x |     +49.3K chars |   987% |      37/34 ms |
+| 20K         |         16.4KB |     3x |    +197.3K chars |   987% |    193/127 ms |
+| 100K        |         16.4KB |     3x |    +203.6K chars |   204% |    232/237 ms |
+| 500K        |         16.4KB |     1x |         +0 chars |     0% |     208/64 ms |
+| 1M          |         16.4KB |     2x |         +0 chars |     0% |    293/140 ms |
 
 ## 4. The rate
 

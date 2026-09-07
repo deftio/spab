@@ -70,6 +70,12 @@ const CATALOG = {
   smartQuotes: { kind: 'channel', hits: 'the apostrophe channel; ws and hyphen survive',
     what: 'Autocorrects straight quotes toward curly.',
     why: 'Word processors and some editors do it as you type. The mirror image of NFKC — it kills the channel NFKC spares.' },
+  sanitisePaste: { kind: 'channel', hits: 'BOTH whitespace carriers and zero-width carriers',
+    what: 'Collapses every whitespace run to one space AND removes every invisible character.',
+    why: 'A rich-text editor, an HTML renderer, or a CMS paste filter. Both destructions arrive ' +
+      'together in real software, and testing them separately flatters both carrier families: a ' +
+      'whitespace scheme sails through stripZw, an insertion scheme sails through collapseWs, and ' +
+      'neither number describes a pipeline that does both. This row is the one that does.' },
   stripZw: { kind: 'attack', hits: 'zero-width carriers, completely',
     what: 'Removes all invisible characters.',
     why: 'A sanitiser, a paste filter, or an anti-steganography scrub. Total loss for zero-width schemes; substitution carriers are untouched.' },
@@ -125,13 +131,57 @@ function completeness() {
     orphaned: documented.filter(m => implemented.indexOf(m) < 0)
   };
 }
+// What the test actually DOES, in concrete terms, at a given intensity. `what` says
+// the transformation in the abstract; this says it against a specific document, which
+// is what a reader needs to judge a result. Expressed against a reference size so the
+// numbers are real rather than symbolic.
+var REF_CHARS = 2000, REF_WORDS = 330;
+function conditions(name, intensity) {
+  var pctOf = function (f, n) { return Math.round(f * n).toLocaleString(); };
+  var inv = function (f, n) { return Math.round((1 - f) * n).toLocaleString(); };
+  var C = {
+    truncate:     function (i) { return 'keeps the first ' + pctOf(i, REF_CHARS) + ' characters and discards the remaining ' + inv(i, REF_CHARS); },
+    truncTail:    function (i) { return 'keeps the LAST ' + pctOf(i, REF_CHARS) + ' characters and discards the first ' + inv(i, REF_CHARS); },
+    midExcerpt:   function (i) { return 'keeps a ' + pctOf(i, REF_CHARS) + '-character slice from the middle; both ends are discarded'; },
+    cutPaste:     function (i) { return 'copies ' + pctOf(i, REF_CHARS) + ' characters out to a new document, starting at an arbitrary point'; },
+    blockErasure: function (i) { return 'retypes one contiguous span of ' + pctOf(i, REF_CHARS) + ' characters, destroying every carrier inside it'; },
+    wordDelete:   function (i) { return 'deletes about ' + Math.round(i * REF_WORDS) + ' of the ' + REF_WORDS + ' words, at random positions'; },
+    wordInsert:   function (i) { return 'inserts about ' + Math.round(i * REF_WORDS) + ' new words at random positions'; },
+    typos:        function (i) { return 'introduces a character typo in about ' + Math.round(i * REF_WORDS) + ' of the ' + REF_WORDS + ' words (drop, double or transpose)'; },
+    saltPepper:   function (i) { return 'randomly replaces about 1 carrier character in ' + Math.max(2, Math.round(1 / i)) + ' with a different variant'; },
+    normalize:    function (i) { return 'collapses about ' + Math.round(i * 100) + '% of carrier variants back to a plain space, leaving the rest'; },
+    regexAttack:  function (i) { return 'strips ' + Math.round(i * 100) + '% of the carrier alphabet, chosen deliberately, as an informed remover would'; },
+    zwNoise:      function (i) { return 'randomly replaces about ' + Math.round(i * 100) + '% of zero-width characters with a different invisible one'; },
+    smartQuotes:  function (i) { return 'converts ' + Math.round(i * 100) + '% of straight apostrophes to curly ones'; },
+    findReplace:  function (i) { return 'runs a terminology find-and-replace over ' + Math.round(i * 100) + '% of matching spans'; },
+    collapseWs:   function () { return 'replaces every run of whitespace with a single plain space; invisible characters are NOT touched'; },
+    sanitisePaste: function () { return 'collapses every whitespace run to one space AND deletes every invisible character'; },
+    extractText:  function () { return 'collapses whitespace and flattens newlines, as PDF text extraction does'; },
+    tokenize:     function () { return 'splits the text on whitespace and rejoins it with single spaces'; },
+    reflow:       function () { return 're-wraps every line to a different width'; },
+    nfkc:         function () { return 'applies Unicode NFKC normalisation to the whole document'; },
+    fullStrip:    function () { return 'replaces every carrier variant with its default form'; },
+    stripZw:      function () { return 'removes every zero-width character'; },
+    emailQuote:   function () { return 'prefixes all ' + Math.round(REF_CHARS / 60) + ' lines with "> ", as a reply quote does'; },
+    trimLines:    function () { return 'strips trailing whitespace from every line'; },
+    concat:       function () { return 'pastes the marked text into the middle of a document twice its size'; },
+    stripMd:      function () { return 'removes markdown emphasis markers throughout'; },
+    reorder:      function () { return 'swaps two sentences; every character survives but the order changes'; },
+    jsonTrip:     function () { return 'serialises the text to a JSON string and parses it back'; }
+  };
+  return C[name] ? C[name](intensity) : null;
+}
+
 function describe(name) {
   const c = CATALOG[name], m = MODELS[name];
   if (!c || !m) return null;
-  return Object.assign({ name: name, intensities: m.intensities, note: m.note }, c);
+  var mid = m.intensities[Math.floor(m.intensities.length / 2)];
+  return Object.assign({ name: name, intensities: m.intensities, note: m.note,
+    testedAt: mid, conditions: conditions(name, mid), refChars: REF_CHARS, refWords: REF_WORDS }, c);
 }
 
-module.exports = { CATALOG: CATALOG, completeness: completeness, describe: describe };
+module.exports = { CATALOG: CATALOG, completeness: completeness, describe: describe,
+  conditions: conditions, REF_CHARS: REF_CHARS, REF_WORDS: REF_WORDS };
 
 if (require.main === module) {
   const gaps = completeness();
@@ -141,6 +191,8 @@ if (require.main === module) {
     console.log('  what: ' + d.what);
     console.log('  why : ' + d.why);
     console.log('  hits: ' + d.hits);
+    console.log('  test: at intensity ' + d.testedAt + ', on a ' + REF_CHARS + '-character document, it ' +
+      (d.conditions || '(no concrete description)'));
   });
   console.log('\n' + Object.keys(MODELS).length + ' models, ' +
     (gaps.missing.length ? 'UNDOCUMENTED: ' + gaps.missing.join(', ') : 'all documented') +

@@ -740,6 +740,79 @@ console.log('\n-- 12b. the build reports itself truthfully --');
   eq(SPAB.version().carriers.length, before, 'version() returns a fresh object each call, not shared state');
 })();
 
+// ============================================================ 12b2. rlnc geometry
+console.log('\n-- 12b2. rlnc packet geometry --');
+
+(function () {
+  var COVER = ('The board reviewed the quarterly figures on Tuesday and asked for a re-forecast ' +
+    'before the end of the month. Operating costs are down year-over-year, though the delays ' +
+    "on the Hartley contract haven't yet worked through the numbers. ").repeat(20);
+  var GEOMS = { 'v1': 32, 'default': 32, 'wide': 64, 'widest': 156 };
+
+  eq(SPAB.encode(COVER, 'x', { ecc: 'rlnc' }).metadata.rlncGeom, 'default',
+    'rlnc uses the default geometry when none is named');
+
+  for (const name of Object.keys(GEOMS)) {
+    const p = { ecc: 'rlnc', rlncGeom: name };
+    const e = SPAB.encode(COVER, 'acme-42', p);
+    eq(e.metadata.rlncPacketBits, GEOMS[name], 'geometry "' + name + '" is ' + GEOMS[name] + ' bits');
+    eq(e.metadata.rlncK, Math.ceil(e.metadata.frameBytes / e.metadata.rlncSymbolBytes),
+      'geometry "' + name + '" gives K = ceil(bytes / symbol)');
+    eq(SPAB.decode(e.text, p).message, 'acme-42', 'geometry "' + name + '" round-trips');
+  }
+
+  // The default doubles the payload share at the SAME width as v1. That is the whole
+  // point of it: packet width is coupled to the 32-bit modem block, so efficiency has
+  // to come out of the esi rather than out of a wider packet.
+  const v1 = SPAB.encode(COVER, 'acme-42', { ecc: 'rlnc', rlncGeom: 'v1' }).metadata;
+  const df = SPAB.encode(COVER, 'acme-42', { ecc: 'rlnc', rlncGeom: 'default' }).metadata;
+  eq(v1.rlncPacketBits, df.rlncPacketBits, 'the default is the same packet width as v1');
+  ok(df.rlncSymbolBytes === 2 * v1.rlncSymbolBytes, 'and carries twice the payload per packet');
+  ok(df.rlncK < v1.rlncK, 'so it needs fewer packets for the same frame (' + df.rlncK + ' vs ' + v1.rlncK + ')');
+
+  // Every geometry must survive the damage classes, not just a clean round trip.
+  const DAMAGE = {
+    'delete a word': t => t.replace(/\s\S+/, ''),
+    'prepend': t => 'A new sentence in front. ' + t,
+    'append': t => t + ' And one at the end.',
+    'first half': t => t.slice(0, Math.floor(t.length / 2)),
+    'smart quotes': t => t.replace(/'/g, '\u2019')
+  };
+  let wrong = 0, trials = 0;
+  for (const name of Object.keys(GEOMS)) {
+    const p = { ecc: 'rlnc', rlncGeom: name };
+    const e = SPAB.encode(COVER, 'acme-42', p);
+    if (SPAB.decode(e.text, p).message !== 'acme-42') continue;
+    for (const [dn, f] of Object.entries(DAMAGE)) {
+      trials++;
+      const got = SPAB.decode(f(e.text), p).message;
+      if (got !== null && got !== 'acme-42') { wrong++; console.error('  WRONG ' + name + '/' + dn); }
+    }
+  }
+  ok(wrong === 0, 'no geometry ever returns a wrong payload under damage (' + trials + ' trials)');
+
+  // Encode and decode must agree: the geometry is not signalled on the wire, so a
+  // mismatch has to fail rather than produce something plausible.
+  const em = SPAB.encode(COVER, 'acme-42', { ecc: 'rlnc', rlncGeom: 'wide' });
+  const mism = SPAB.decode(em.text, { ecc: 'rlnc', rlncGeom: 'default' });
+  ok(mism.message === null || mism.message === 'acme-42',
+    'a mismatched geometry yields nothing rather than a wrong payload');
+  // An unknown name falls back to the default rather than throwing.
+  eq(SPAB.encode(COVER, 'x', { ecc: 'rlnc', rlncGeom: 'nonsense' }).metadata.rlncPacketBits, 32,
+    'an unknown geometry name falls back to the default');
+
+  // Payloads across a range of K, so the solver is exercised beyond the trivial case.
+  for (const pl of ['x', 'acme-42', 'contract-2026-11-draft', 'a'.repeat(60)]) {
+    const p = { ecc: 'rlnc' };
+    const e = SPAB.encode(COVER.repeat(2), pl, p);
+    eq(SPAB.decode(e.text, p).message, pl, 'a ' + pl.length + '-char payload round-trips (K=' + e.metadata.rlncK + ')');
+  }
+  // Cross-carrier pooling: every enabled class emits disjoint esi ranges.
+  const multi = SPAB.encode(COVER, 'acme-42', { ecc: 'rlnc', classes: ['ws', 'apos', 'hyphen'] });
+  eq(SPAB.decode(multi.text, { ecc: 'rlnc', classes: ['ws', 'apos', 'hyphen'] }).message, 'acme-42',
+    'packets pool across carrier classes');
+})();
+
 // ============================================================ 12c. the soft layer
 console.log('\n-- 12c. sliding histogram detector and the soft layer --');
 

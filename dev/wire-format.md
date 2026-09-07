@@ -532,6 +532,94 @@ A byte-aligned version of this same header — one byte each for version, type, 
 enc, and cksum — would be 40 bits before the length and checksum. Bit packing saves
 23 bits per packet; the trailing pad gives back at most 7.
 
+## 9b. The ECC layer
+
+Everything above specifies the **packet**. This section specifies what is written into
+the carrier stream, which is a different thing and was previously left to the
+implementation — a gap, since a port cannot be bit-compatible without it.
+
+The packet is the *payload* of this layer. Both modes zero-pad to the channel's
+capacity after emitting.
+
+### Repetition (default)
+
+No framing of its own. The packet's bits are concatenated back to back:
+
+```
+[ packet ][ packet ][ packet ] … [ 0 0 0 … ]
+```
+
+`reps = floor(capacity / packetBits)`. If the packet does not fit once, one truncated
+copy is written and `metadata.issues` says so. The decoder recovers the stride from
+the packet header (which is why the header parse must not verify the checksum — the
+fold needs the stride before it can vote), folds the copies with a per-bit majority
+vote, then parses.
+
+### RLNC fountain (`ecc: 'rlnc'`)
+
+A GF(2⁸) systematic random-linear code. Field polynomial **0x11D**, generator 2,
+log/antilog tables.
+
+The packet is split into **K source symbols** of `sym` bytes, zero-padded:
+`K = ceil(packetBytes / sym)`.
+
+Each emitted fountain packet is three bit fields:
+
+```
+[ esi : esiBits ][ data : sym*8 ][ crc : crcBits ]
+```
+
+Only `data` is byte-aligned; `esi` and `crc` are bit fields and never take part in
+field arithmetic.
+
+| geometry | esi | data | crc | width | payload share |
+|---|--:|--:|--:|--:|--:|
+| `v1` | 16 | 8 | 8 | 32 | 25% |
+| **`default`** | **8** | **16** | **8** | **32** | **50%** |
+| `wide` | 16 | 32 | 16 | 64 | 50% |
+| `widest` | 12 | 128 | 16 | 156 | 82% |
+
+The geometry is **not signalled on the wire**: encoder and decoder must be given the
+same `rlncGeom`, exactly as they must agree on `ecc` and `classes`. That is a known
+limitation, not a design choice — see `dev/roadmap.md`.
+
+**Packet width is coupled to the modem.** The mixed-radix layer groups carrier sites
+into 32-bit blocks and the resync sweep re-cuts that grid one site at a time, so a
+packet wider than one block is far harder to realign after an insertion or deletion.
+Measured on desync damage: 32-bit packets recover 20%, 40-bit 1%, 64-bit 3%, 96-bit
+0%. A conforming implementation may offer wider geometries but should default to 32.
+
+**ESI semantics.** The coefficient row for symbol id `esi` over `K` sources is:
+
+* `esi < K` — **systematic**: the unit vector `e[esi]`, so `data` is source symbol
+  `esi` verbatim.
+* `esi ≥ K` — **repair**: `K` bytes drawn from `prng32(0x9E37 + esi)`, and
+  `data = Σ coeff[j] · source[j]` over GF(2⁸).
+
+`rlncCoeffs(esi, K)` is a **pure function**, so a given `esi` always encodes the same
+equation.
+
+**Checksum.** `crc8` for `crcBits ≤ 8`, otherwise `crc16`, taken over
+`[0xA5, esiHi, esiLo] ‖ data` and truncated to `crcBits`. The `0xA5` seed means an
+all-zero (blank or erased) window does not validate — the "zero is a valid codeword"
+trap.
+
+**Emission and wrapping.** Each enabled carrier class emits `floor(capacity / width)`
+packets. `esiBase` advances across classes so classes carry different equations and
+their survivors pool into one solve. When `esiBase + n` exceeds the ESI space, the id
+**wraps**: since the coefficients are a pure function of `esi`, a wrapped packet is an
+identical duplicate rather than a second equation claiming the same id, and the
+decoder keeps the first valid copy of each. Capacity beyond the distinct-equation
+space therefore buys redundancy rather than being discarded — measured on a 200K
+character cover, that takes heavy-damage recovery from 60% to 80%.
+
+**Decoding.** Collect packets whose checksum passes, keyed by `esi`, first copy wins.
+Guess `K` upward and solve by Gaussian elimination over GF(2⁸) with a vector
+right-hand side; a wrong `K` fails the packet checksum and the next candidate is
+tried. Recovery needs **K linearly independent** equations, not merely K packets.
+
+---
+
 ## 10. Conformance
 
 An implementation conforms if it:

@@ -556,78 +556,209 @@
 
   // ================= HOW IT WORKS =================
   function howView() {
+    // The worked example is COMPUTED, not written. Every number below comes from
+    // running the codec in the reader's browser, so the page cannot drift from the
+    // implementation the way prose does.
+    var demoCover = 'The board reviewed the quarterly figures on Tuesday and asked for a ' +
+      're-forecast before the end of the month. Operating costs are down year-over-year.';
+    var demoMsg = 'acme-42';
+    var demoEnc = SPAB.encode(demoCover, demoMsg, {});
+    var demoMeta = demoEnc.metadata;
+    var demoDec = SPAB.decode(demoEnc.text, {});
+    var sites = SPAB.getSites(demoCover, {});
+    var hist = SPAB.histogram(demoEnc.text);
+
+    // Render the first N carrier sites of the marked text, showing which variant
+    // each gap became. This is the whole mechanism in one strip.
+    function siteStrip(text, n) {
+      var idx = SPAB.CLASS_DEFS.ws.detect(text).slice(0, n);
+      var names = ['U+0020', 'U+2006', 'U+2009', 'U+200A'];
+      return { t: 'div', a: { style: bw.s({ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }) },
+        c: idx.map(function (i) {
+          var v = SPAB.CLASS_DEFS.ws.read(text, i);
+          var word = text.slice(Math.max(0, text.lastIndexOf(' ', i - 1) + 1), i);
+          return { t: 'div', a: { style: bw.s({ border: '1px solid ' + p.light.border, borderRadius: '6px',
+            padding: '4px 7px', fontSize: '11px', fontFamily: 'ui-monospace,Menlo,monospace',
+            background: v ? p.tertiary.light : 'transparent' }) },
+            c: [{ t: 'div', a: { style: bw.s({ opacity: '.6' }) }, c: 'after "' + word + '"' },
+                { t: 'div', a: { style: bw.s({ fontWeight: '600' }) }, c: names[v] + '  = ' + v.toString(2).padStart(2, '0') }] };
+        }) };
+    }
+
+    function step(n, title, body) {
+      return { t: 'div', a: { style: bw.s({ display: 'flex', gap: '14px', marginTop: '20px' }) }, c: [
+        { t: 'div', a: { style: bw.s({ flex: '0 0 30px', height: '30px', borderRadius: '50%',
+          background: p.primary.base, color: '#fff', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', fontWeight: '700', fontSize: '14px' }) }, c: String(n) },
+        { t: 'div', a: { style: bw.s({ flex: '1 1 auto', minWidth: '0' }) },
+          c: [{ t: 'h3', a: { style: bw.s({ margin: '2px 0 6px' }) }, c: title }].concat(body) } ] };
+    }
+    function pre(text) {
+      return { t: 'pre', a: { style: bw.s({ background: p.light.surface, border: '1px solid ' + p.light.border,
+        borderRadius: '8px', padding: '10px 12px', fontSize: '12.5px', overflowX: 'auto', margin: '8px 0' }) },
+        c: [{ t: 'code', c: text }] };
+    }
+    var P = function (html) { return { t: 'p', a: { class: 'prose' }, c: bw.raw(html) }; };
+
     return { t: 'div', c: [
       S({
         eyebrow: 'Reference',
         title: 'How spab works',
-        lede: 'A quick tour of the carriers, the parallel-channel design, error correction, and — honestly — the limits.',
+        lede: 'A walk through what happens to a message between calling encode and reading it back, ' +
+              'in the order it happens. The numbers below are computed in your browser from the ' +
+              'example shown, not written into the page.',
         content: { t: 'div', c: [
-          { t: 'h3', c: 'Carriers: whitespace + confusables' },
-          { t: 'p', a: { class: 'prose' }, c: bw.raw('spab writes bits by substituting characters that look the same but differ in code point. Two classes are on by default, chosen from measurement:') },
-          tt(['Carrier', 'Choice (bit 0 / 1)', 'Bits/site', 'Survives NFKC?'], [
-            ['whitespace', 'space / thin / hair / six-per-em', '2', bw.raw('<b style="color:' + p.danger.base + '">no</b> — collapses to a plain space')],
-            ['apostrophe', bw.raw("straight <code>'</code> / curly <code>&#8217;</code>"), '1', bw.raw('<b style="color:' + p.success.base + '">yes</b>')],
-            ['hyphen', bw.raw('hyphen-minus / Unicode hyphen'), '1', bw.raw('<b style="color:' + p.success.base + '">yes</b>')]
+
+          P('Text contains choices a reader never notices. Which of several identical-looking space ' +
+            'characters sits between two words. Whether an apostrophe is straight or curly. Whether a ' +
+            'hyphen is <code>U+002D</code> or <code>U+2010</code>. spab spends those choices to carry bits, ' +
+            'and leaves everything a reader can see alone.'),
+
+          P('Take this sentence as the cover text:'),
+          pre(demoCover),
+          P('It has <b>' + sites.length + ' carrier sites</b> — positions where a character can be swapped for ' +
+            'an equivalent one. Hiding <code>"' + demoMsg + '"</code> in it does this to the first few of them:'),
+          siteStrip(demoEnc.text, 10),
+          P('Each whitespace site holds one of four space characters, so <b>2 bits</b> each. The marked text ' +
+            'is <b>' + demoEnc.text.length + ' characters</b>, the same as the original ' + demoCover.length +
+            ' — every change is a substitution, never an insertion.'),
+
+          { t: 'h3', a: { style: bw.s({ marginTop: '30px' }) }, c: 'Encoding, step by step' },
+
+          step(1, 'Work out what the payload is', [
+            P('The message is inspected and given a <b>type</b>: <code>string</code>, <code>json</code>, ' +
+              '<code>uuid</code>, <code>sha256</code>, <code>ser8</code> (an 8-byte tag), or raw <code>bytes</code>. ' +
+              'This is not cosmetic. A fixed-size type carries no length field at all, and it stores compactly — ' +
+              'a UUID travels as 16 raw bytes rather than 36 characters.'),
+            P('Here the type is <code>' + demoMeta.type + '</code> and the payload is ' +
+              demoMeta.messageBytes + ' bytes.')
           ]),
-          { t: 'p', a: { class: 'prose' }, c: bw.raw('The key insight: <b>NFKC normalization</b> (common in databases, forms, and search) erases every whitespace variant, but the confusables survive it — while a "smart-quote" autocorrect erases the apostrophe channel but leaves whitespace. They fail on <i>different</i> channels.') },
-          { t: 'p', a: { class: 'prose' }, c: bw.raw('One honest caveat about the whitespace carrier: the variants are <i>equivalent</i>, not <i>identical</i>. Thin, hair and six-per-em spaces are narrower than a plain space, so in a proportional font a marked paragraph sets about <b>3% narrower</b> than its source — invisible on its own, occasionally noticeable side by side. The confusable carriers (quote, hyphen) have no such tell. Monospace rendering normalizes the advances entirely.') }
+
+          step(2, 'Compress it, but only if that helps', [
+            P('Compression is attempted on every payload and kept <b>only if the result is smaller</b>. ' +
+              'That condition matters more than it sounds: payloads here are usually 8&ndash;200 bytes, and every ' +
+              'general-purpose compressor makes inputs that small <i>bigger</i>. Compressing unconditionally ' +
+              'would inflate the most common case.'),
+            P('For this payload: <code>' + demoMeta.compression + '</code>' +
+              (demoMeta.compression === 'none' ? ' — seven bytes of text has nothing to compress.' : '.'))
+          ]),
+
+          step(3, 'Encrypt it, if you asked for that', [
+            P('With <code>params.encKey</code> the payload is encrypted with AES-256-GCM and the content becomes ' +
+              '<code>nonce &#8214; ciphertext &#8214; tag</code>, costing 28 bytes. Without a key nothing happens here.'),
+            P('Encryption and the optional <code>params.key</code> scramble are different things. Encryption hides ' +
+              'the <i>contents</i>. The scramble rearranges <i>where the symbols go</i>, which raises the cost of ' +
+              'stripping the mark but is not confidentiality. They compose.')
+          ]),
+
+          step(4, 'Wrap it in a packet', [
+            P('A 17-bit header, then the checksum, then the content:'),
+            pre('[ version:3 | type:5 | comp:3 | enc:3 | cksum:3 ]   17-bit fixed header\n' +
+                '[ extension bytes ]              only when a field runs out of values\n' +
+                '[ length varint ]                only when the type does not imply it\n' +
+                '[ checksum, 8 << cksum bits ]    before the content, deliberately\n' +
+                '[ content ][ pad to a byte ]'),
+            P('Two things are unusual and both are deliberate. There is <b>no magic number</b> — the header\'s own ' +
+              'plausibility plus the checksum is what tells the decoder it has found a packet. And the ' +
+              '<b>checksum comes before the content</b>: the commonest damage is losing the end of a document, and ' +
+              'a checksum at the end dies with the data it was protecting. In front, a surviving header still says ' +
+              'what the missing bytes should have hashed to.'),
+            P('This packet: <b>' + demoMeta.headerBits + ' header bits</b> + ' + (demoMeta.payloadBytes * 8) +
+              ' content bits, checksum <code>' + demoMeta.checksum + '</code>, ' +
+              demoMeta.frameBytes + ' bytes in total.')
+          ]),
+
+          step(5, 'Add error correction', [
+            P('The packet is written <b>' + demoMeta.reps + ' times</b> here, as many as the text will hold, and the ' +
+              'decoder takes a per-bit majority vote. That is the default. The alternative, <code>ecc: "rlnc"</code>, ' +
+              'is a fountain code: it emits self-checking 32-bit packets that can be pooled from whichever carrier ' +
+              'channels survived.'),
+            P('Which is better depends on the damage. Majority voting corrects <i>bit errors</i>, because a wrong bit ' +
+              'is outvoted. The fountain handles <i>lost pieces</i>, because a small packet fits in a fragment that ' +
+              'a whole frame does not. On a document cut into many pieces the fountain recovers roughly five times ' +
+              'as often; on scattered character damage majority voting wins.'),
+            P('<b>Redundancy is the variable that matters.</b> Recovery is around 29% at one copy and 57% at five to ' +
+              'eight, for the same carriers and the same damage. More text buys copies, and copies buy survival.')
+          ]),
+
+          step(6, 'Pack the bits into carrier symbols', [
+            P('Carriers have different alphabet sizes — whitespace has 4 variants, apostrophes and hyphens 2 — so bits ' +
+              'are packed by mixed-radix conversion in bounded blocks rather than one site at a time. That recovers ' +
+              'the fractional bits a non-power-of-two alphabet would otherwise waste.'),
+            P('The cost of blocking is worth knowing: every site in a block affects every bit of that block, so one ' +
+              'damaged character can cost up to 32 bits rather than 2.')
+          ]),
+
+          step(7, 'Write it into the text', [
+            P('Each enabled carrier class is an <b>independent channel carrying the whole payload</b>. That is not ' +
+              'extra capacity — what decides whether a payload fits is the largest single channel, not the sum. ' +
+              'It is redundancy against different failures.'),
+            P('The default set is whitespace plus apostrophe and hyphen, chosen because they break on different ' +
+              'edits. NFKC normalisation, which databases and search systems apply routinely, flattens every ' +
+              'whitespace variant and leaves the confusables intact. A word processor\'s smart-quote autocorrect ' +
+              'does the opposite. Neither edit takes both.'),
+            { t: 'div', a: { style: bw.s({ marginTop: '10px' }) }, c: [tt(
+              ['carrier', 'variants', 'bits/site', 'sites here', 'survives NFKC'],
+              [['whitespace', 'space / six-per-em / thin / hair', '2', String(SPAB.CLASS_DEFS.ws.detect(demoCover).length),
+                bw.raw('<b style="color:' + p.danger.base + '">no</b>')],
+               ['apostrophe', bw.raw("straight <code>'</code> / curly <code>&#8217;</code>"), '1',
+                String(SPAB.CLASS_DEFS.apos.detect(demoCover).length),
+                bw.raw('<b style="color:' + p.success.base + '">yes</b>')],
+               ['hyphen', bw.raw('<code>-</code> / <code>&#8208;</code>'), '1',
+                String(SPAB.CLASS_DEFS.hyphen.detect(demoCover).length),
+                bw.raw('<b style="color:' + p.success.base + '">yes</b>')]])] }
+          ]),
+
+          { t: 'h3', a: { style: bw.s({ marginTop: '34px' }) }, c: 'Decoding, and the part that is hard' },
+
+          P('Reading back is the same steps in reverse: read each site, unpack the blocks into bits, vote across the ' +
+            'copies, verify the checksum, then decrypt and decompress. On this example that returns ' +
+            '<code>"' + demoDec.message + '"</code> with status <code>' + demoDec.metadata.status + '</code>.'),
+
+          P('The difficulty is <b>synchronisation</b>. Delete one word and every carrier after it shifts by one ' +
+            'position, so the block grid is cut in the wrong place and everything past the edit decodes to noise. ' +
+            'Redundancy does not help, because every copy shifts identically.'),
+
+          pre('sent:      A B C D E F G\n' +
+              'received:  A B   D E F G      <- C deleted\n' +
+              '                 ^ everything from here is framed one position early'),
+
+          P('Two mechanisms handle it. The decoder re-cuts the block grid at each of <b>32 offsets</b> and tries again, ' +
+            'so a uniform shift becomes "try phase 3 instead of phase 0". And because each packet carries its own ' +
+            'checksum and length, one intact copy can be recognised <b>anywhere</b> in the stream without help from ' +
+            'its neighbours.'),
+
+          { t: 'h3', a: { style: bw.s({ marginTop: '34px' }) }, c: 'What destroys a mark' },
+
+          P('Stated plainly, because the failure cases are the useful part of knowing how something works.'),
+          { t: 'div', c: [tt(['edit', 'effect'], [
+            ['Normalising whitespace', 'Destroys the whitespace channel completely. Pasting into a plain-text field, ' +
+              'a search index, or PDF text extraction all do this. The confusable channels survive, but they are small.'],
+            ['Reflowing or re-wrapping', 'Same — the whitespace channel is gone.'],
+            ['Retyping the text', 'Removes everything. No character-level scheme survives a rewrite.'],
+            ['Stripping invisible characters', 'Removes a zero-width mark entirely; leaves a substitution mark untouched.'],
+            ['Deliberate removal', 'Anyone who knows the carrier set can strip it. spab does not claim otherwise.'],
+            ['Editing, quoting, excerpting', 'Survivable, and this is what the redundancy and resynchronisation are for.']
+          ])] },
+
+          P('One property is treated as more important than recovery: a damaged mark must never decode to a ' +
+            '<i>different</i> payload. Losing a watermark is a non-answer, which a caller can handle. Returning ' +
+            'someone else\'s identifier is a false provenance claim, which they cannot. The test suite forbids the ' +
+            'second and merely measures the first.'),
+
+          P('There is also a visual tell worth knowing. Thin, hair and six-per-em spaces are <i>equivalent</i> to a ' +
+            'plain space, not <i>identical</i> to it — they are narrower. In a proportional font a marked paragraph ' +
+            'sets about 3% narrower than its source: invisible alone, occasionally noticeable side by side. ' +
+            'Monospace rendering removes the difference, and the confusable carriers have no such tell.'),
+
+          P('Measured behaviour under 27 models of real-world damage is on the ' +
+            '<a href="#/robustness">robustness page</a>, and you can run any of this yourself in the ' +
+            '<a href="#/test">playground</a>.')
         ] }
-      }),
-
-      S({
-        tight: true,
-        title: 'Parallel channels',
-        content: { t: 'div', c: [
-          { t: 'p', a: { class: 'prose' }, c: 'Each carrier is an independent channel that carries the whole payload. Decode returns whichever channel survived — so an edit that kills one leaves the others intact:' },
-          tt(['Attack', 'whitespace-only', 'default (multi-carrier)'], [
-            ['clean', '✓', bw.raw('✓ <span style="opacity:.6">via whitespace</span>')],
-            ['NFKC normalize', bw.raw('<b style="color:' + p.danger.base + '">FAIL</b>'), bw.raw('✓ <span style="opacity:.6">via apostrophe</span>')],
-            ['smart-quote autocorrect', '✓', bw.raw('✓ <span style="opacity:.6">via whitespace</span>')],
-            ['strip whitespace', bw.raw('<b style="color:' + p.danger.base + '">FAIL</b>'), bw.raw('✓ <span style="opacity:.6">via apostrophe</span>')]
-          ])
-        ] }
-      }),
-
-      S({
-        tight: true,
-        title: 'Under the hood',
-        content: bw.makeAccordion({
-          items: [
-            { title: 'Error correction',
-              content: bw.raw('Two ECC modes. <b>Repetition</b> (default) writes the framed payload many times and majority-votes per bit — strong when a channel is dense. <b>RLNC fountain</b> (a from-scratch GF(256) random-linear code) breaks the payload into self-checking, self-locating packets that <i>pool across all channels</i>, so surviving carriers reconstruct the whole message. Both are dependency-free.') },
-            { title: 'Symbol packing (no wasted bits)',
-              content: bw.raw('Between the ECC bit stream and the carrier glyphs sits one <b>mixed-radix symbol layer</b>. A carrier with <i>N</i> equivalent glyphs per site holds log<sub>2</sub><i>N</i> bits — often fractional (a 3-way choice is 1.585 bits, not 1). Rather than round down at every site and throw those fractions away, spab packs the bit stream into the sites by base conversion, in <b>bounded blocks</b> so a damaged symbol only affects its block (never the whole message). Every carrier — even the power-of-two ones — flows through the same layer.') },
-            { title: 'Optional keyed scramble',
-              content: bw.raw('Pass a <b>key</b> and the symbol stream is <b>whitened</b> (a key-derived pseudo-random value is added to each symbol, flattening the carrier statistics) and <b>interleaved</b> (a key-derived permutation spreads burst damage across blocks and hides the order). Right key decodes; wrong or missing key does not. This is <i>keyed</i> — cryptography, not a hidden constant — but it is a <b>cost multiplier, not confidentiality</b>: real secrecy will come from the planned authenticated cipher.') },
-            { title: 'Edits that add or remove text',
-              content: bw.raw('Inserting or deleting a word usually changes how many carrier sites the text has, and that shifts the whole symbol stream: blocks get cut one position off, so everything after the edit reads as noise. Redundancy alone cannot fix it, because every copy shifts together — measured across 1x, 2x, 4x and 11x redundancy, all failed identically. The decoder therefore <b>resynchronises</b>: it re-cuts the block grid at each phase, pooling RLNC packets from every phase and, for repetition, scanning for a single intact self-contained frame. On the research harness this took excerpting (cut/paste at 75% kept) from 2% to 17% recovery, and word deletion from 3% to 6%. Recovery still depends on spare capacity — a passage holding exactly one copy has nothing to fall back on.') },
-            { title: 'Capacity vs. robustness',
-              content: bw.raw('More redundancy = more survivable, less payload. A short passage holds a tiny serial ultra-redundantly; a long document holds a hash, JSON, or an easter-egg program. Match payload size to text length, then spend the rest on redundancy.') }
-          ]
-        })
-      }),
-
-      S({
-        tight: true,
-        title: 'What it is not',
-        content: { t: 'div', a: { style: bw.s({ maxWidth: '820px' }) }, c: bw.makeAlert({
-          variant: 'warning',
-          content: bw.raw('spab targets <b>incidental</b> robustness — ordinary editing, copy/paste, reformatting. It does <b>not</b> defeat a determined stripper: anyone who knows the carrier set can remove it, and fully rewriting the text removes it entirely. The design raises that cost and makes stripping detectable, but never claims to be unbreakable.')
-        }) }
-      }),
-
-      S({
-        tight: true,
-        content: bw.makeCTA({
-          title: 'See it live',
-          description: 'Every claim on this page is testable in the browser.',
-          actions: [bw.makeButton({ text: 'Open the playground →', variant: 'primary', onclick: function () { bw.navigate('/test'); } })]
-        })
       })
     ] };
   }
 
-  // ================= LIBRARIES / INTEGRATION (long, anchored) =================
   function goTo(id) { var el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   function langSection(id, name, status, statusVar, blurb, install, code, notes) {
     return { t: 'section', a: { id: id, style: bw.s({ paddingTop: '18px', scrollMarginTop: '70px' }) }, c: [
@@ -658,123 +789,323 @@
     if (!D) {
       return { t: 'div', a: { class: 'wrap section' }, c: [
         { t: 'h2', c: 'Robustness' },
-        { t: 'p', a: { class: 'lede' }, c: 'Results have not been generated yet. Run ' +
+        { t: 'p', a: { class: 'lede' }, c: 'No results generated yet. Run ' +
           'comparisons/run.js --js pages/data/robustness.js from a checkout.' }] };
     }
     var ran = D.libraries.filter(function (l) { return l.ran; });
-    var skipped = D.libraries.filter(function (l) { return !l.ran; });
+    var cat = {};
+    (D.catalog || []).forEach(function (c) { cat[c.name] = c; });
 
+    // One neutral scale for every library, spab included. Colouring "us" green would
+    // be the easiest way to make this page dishonest.
     function pctCell(r) {
-      if (!r || r.pct === null) return { t: 'td', a: { style: bw.s({ textAlign: 'right', opacity: '.4' }) }, c: 'n/a' };
-      // One neutral scale for every library, spab included. A green-for-us palette
-      // would be the easiest way to make this page dishonest.
-      var v = r.pct, hue = Math.round(v * 1.2);       // 0 = red, 120 = green
-      return { t: 'td', a: { title: r.ok + ' of ' + r.tot + ' trials recovered',
-        style: bw.s({ textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-          background: 'hsl(' + hue + ',62%,' + (92 - v * 0.10) + '%)',
+      if (!r || r.pct === null) return { t: 'span', a: { style: bw.s({ opacity: '.35' }) }, c: 'n/a' };
+      var v = r.pct, hue = Math.round(v * 1.2);
+      return { t: 'span', a: { title: r.ok + ' of ' + r.tot + ' trials recovered',
+        style: bw.s({ display: 'inline-block', minWidth: '46px', textAlign: 'right',
+          padding: '2px 7px', borderRadius: '5px', fontVariantNumeric: 'tabular-nums',
+          background: 'hsl(' + hue + ',62%,' + (93 - v * 0.11) + '%)',
           color: v > 55 ? '#0f2410' : '#3a1210' }) }, c: v + '%' };
     }
-    function kindBadge(k) {
-      var m = { control: ['control', 'bw_info'], channel: ['channel', 'bw_secondary'], attack: ['attack', 'bw_warning'] }[k];
-      return bw.makeBadge({ text: m[0], variant: m[1] });
-    }
+    var KIND = {
+      control: ['control', 'info', 'must always survive — a failure here is a bug, not a result'],
+      channel: ['channel', 'secondary', 'ordinary document handling — editing, pasting, exporting'],
+      attack:  ['attack',  'warning', 'deliberate removal by someone who knows the scheme']
+    };
 
-    var rows = D.models.slice().sort(function (a, b) { return a.model.localeCompare(b.model); })
+    // ---- the main table: one row per channel model ----
+    var rows = D.models.slice()
+      .sort(function (a, b) {
+        var ka = (cat[a.model] || {}).kind || 'zz', kb = (cat[b.model] || {}).kind || 'zz';
+        var order = { control: 0, channel: 1, attack: 2 };
+        return (order[ka] - order[kb]) || a.model.localeCompare(b.model);
+      })
       .map(function (m) {
-        var cat = (D.catalog || []).filter(function (c) { return c.name === m.model; })[0];
-        return { t: 'tr', c: [
-          { t: 'td', c: [{ t: 'code', c: m.model }] },
-          { t: 'td', c: cat ? kindBadge(cat.kind) : '' },
-          { t: 'td', a: { style: bw.s({ fontSize: '13px', opacity: '.8', maxWidth: '340px' }) },
-            c: cat ? cat.why : (m.note || '') },
-          { t: 'td', a: { style: bw.s({ textAlign: 'right', opacity: '.6' }) }, c: String(m.intensity) }
-        ].concat(ran.map(function (l) {
-          return pctCell(m.results.filter(function (r) { return r.lib === l.name; })[0]);
-        })) };
+        var c = cat[m.model] || {};
+        var sc = D.scope || {};
+        var docs = sc.docChars ? (sc.docChars[0].toLocaleString() + '\u2013' + sc.docChars[1].toLocaleString() + ' chars') : '\u2014';
+        var secrets = sc.secretBytes ? (sc.secretBytes[0] + '\u2013' + sc.secretBytes[1] + ' B') : '\u2014';
+        var row = { model: m.model, kind: c.kind || '', what: c.conditions || c.what || m.note || '',
+          docs: docs, secrets: secrets };
+        ran.forEach(function (l) {
+          var r = m.results.filter(function (x) { return x.lib === l.name; })[0];
+          row[l.name] = r && r.pct !== null ? r.pct : -1;
+          row['_' + l.name] = r;
+        });
+        return row;
       });
 
-    var head = { t: 'tr', c: [
-      { t: 'th', a: { style: bw.s({ textAlign: 'left' }) }, c: 'model' },
-      { t: 'th', a: { style: bw.s({ textAlign: 'left' }) }, c: 'kind' },
-      { t: 'th', a: { style: bw.s({ textAlign: 'left' }) }, c: 'what it stands in for' },
-      { t: 'th', a: { style: bw.s({ textAlign: 'right' }) }, c: 'level' }
-    ].concat(ran.map(function (l) {
-      return { t: 'th', a: { style: bw.s({ textAlign: 'right', whiteSpace: 'nowrap' }) }, c: l.name };
-    })) };
+    // SORTING NOTE. bw.makeTable's own sort cannot be used with these columns.
+    // Its initial render accepts a DOM spec from render(), but its re-render path
+    // does `td.textContent = render(...)`, so a spec object becomes the string
+    // "[object Object]" the moment a header is clicked. render() has to return a
+    // plain string for that path to work, which would cost the badges, the heat
+    // colouring and the per-cell trial counts.
+    //
+    // So sorting is done here instead: `sortable: false` on the table, and a small
+    // control that re-sorts the data and rebuilds the container. Same result, rich
+    // cells kept, and no reliance on the broken path.
+    var sortState = { key: null, dir: 'desc' };
+    function sortRows(list) {
+      if (!sortState.key) {
+        var order = { control: 0, channel: 1, attack: 2 };
+        return list.slice().sort(function (a, b) {
+          return (order[a.kind] - order[b.kind]) || a.model.localeCompare(b.model);
+        });
+      }
+      var k = sortState.key, sign = sortState.dir === 'asc' ? 1 : -1;
+      return list.slice().sort(function (a, b) {
+        var x = a[k], y = b[k];
+        if (typeof x === 'number' && typeof y === 'number') return sign * (x - y);
+        return sign * String(x).localeCompare(String(y));
+      });
+    }
 
-    var safety = D.safety.slice().sort(function (a, b) { return a.lib.localeCompare(b.lib); })
+    var columns = [
+      { key: 'model', label: 'test',
+        render: function (v) { return { t: 'code', a: { style: bw.s({ fontSize: '12px' }) }, c: v }; } },
+      { key: 'kind', label: 'kind',
+        render: function (v) { return v ? bw.makeBadge({ text: KIND[v][0], variant: KIND[v][1] }) : ''; } },
+      { key: 'what', label: 'what the test does to the document',
+        render: function (v) {
+          return { t: 'span', a: { style: bw.s({ fontSize: '12.5px', opacity: '.85' }) }, c: v };
+        } },
+      // Doc and secret size are identical on every row, and stated here anyway: a
+      // reader looking at one row should not have to scroll back to a card to learn
+      // what was actually encoded into what.
+      { key: 'docs', label: 'documents',
+        render: function (v) { return { t: 'span', a: { style: bw.s({ fontSize: '12px', opacity: '.7', whiteSpace: 'nowrap' }) }, c: v }; } },
+      { key: 'secrets', label: 'secrets',
+        render: function (v) { return { t: 'span', a: { style: bw.s({ fontSize: '12px', opacity: '.7', whiteSpace: 'nowrap' }) }, c: v }; } }
+    ].concat(ran.map(function (l) {
+      return { key: l.name, label: l.name,
+        render: function (v, row) { return pctCell(row['_' + l.name]); } };
+    }));
+
+    // ---- safety table ----
+    var safetyRows = D.safety.slice().sort(function (a, b) { return a.lib.localeCompare(b.lib); })
       .map(function (s) {
         var total = s.wrong + s.lost + s.recovered;
-        return { t: 'tr', c: [
-          { t: 'td', c: s.lib },
-          { t: 'td', a: { style: bw.s({ textAlign: 'right' }) }, c: s.falsePositive + ' / ' + s.falsePositiveOf },
-          { t: 'td', a: { style: bw.s({ textAlign: 'right', fontWeight: s.wrong ? '700' : '400' }) },
-            c: s.wrong + (total ? '  (' + Math.round(100 * s.wrong / total) + '%)' : '') },
-          { t: 'td', a: { style: bw.s({ textAlign: 'right', opacity: '.7' }) }, c: String(s.lost) },
-          { t: 'td', a: { style: bw.s({ textAlign: 'right', opacity: '.7' }) }, c: String(s.recovered) },
-          { t: 'td', a: { style: bw.s({ fontSize: '12px', opacity: '.65' }) },
-            c: s.example ? s.example.model + ': wrote "' + s.example.wrote + '", got ' + JSON.stringify(s.example.got).slice(0, 22) + '…' : '—' }
-        ] };
+        return { lib: s.lib, fp: s.falsePositive + ' / ' + s.falsePositiveOf,
+          wrong: s.wrong, wrongPct: total ? Math.round(100 * s.wrong / total) : 0,
+          lost: s.lost, recovered: s.recovered,
+          example: s.example ? (s.example.model + ': wrote "' + s.example.wrote + '", got ' +
+            JSON.stringify(s.example.got).slice(0, 20) + '…') : '—' };
       });
 
     return { t: 'div', a: { class: 'wrap section' }, c: [
       { t: 'h2', c: 'Robustness under channel noise' },
-      { t: 'p', a: { class: 'lede' }, c: 'How spab and other text-watermarking libraries hold up ' +
-        'against ' + D.models.length + ' models of what happens to documents in the world — normalisation, ' +
-        'excerpting, reflow, sanitisers, and deliberate removal.' },
+      { t: 'p', a: { class: 'lede' }, c: 'Seven text-watermarking implementations, put through ' +
+        D.models.length + ' models of what happens to documents in the world, on the same corpus with the ' +
+        'same damage applied to each.' },
 
-      bw.makeCard({ title: 'How to read this, and how not to', content: { t: 'div', a: { class: 'prose' }, c: bw.raw(
-        '<p>This benchmark is published by spab, which is a reason to be skeptical of it. ' +
-        'The mitigations are structural rather than promises:</p>' +
+      // -------- what was actually run, before any number --------
+      bw.makeCard({ title: 'Test conditions', content: { t: 'div', a: { class: 'prose' }, c: bw.raw(
+        '<p>Every library encodes the same payloads into the same texts, then the same damage is applied ' +
+        'with the same random seed, and the payload is read back. A library that cannot carry a payload ' +
+        'into a given text is <b>excluded from that cell</b> rather than scored zero.</p>' +
         '<ul>' +
-        '<li>Every library runs the <b>same corpus, payloads and damage</b>, from the same code path.</li>' +
-        '<li>Rows are sorted <b>alphabetically by model</b>, never by who wins, and spab\'s losses are ' +
-        'coloured on the same scale as its wins.</li>' +
-        '<li>Configuration that changes a result is <b>stated next to the library</b>, not buried.</li>' +
-        '<li>A library that was not run shows <b>n/a</b>. It never appears as 0%.</li>' +
-        '<li>The numbers come from <code>comparisons/run.js</code> in the repository. ' +
-        'Clone it and re-run; if the table here disagrees with your run, trust yours.</li>' +
-        '</ul>' +
-        '<p><b>What this cannot tell you.</b> Recovery depends heavily on how much spare capacity a ' +
-        'document has, and these are fixed samples at four lengths. It measures libraries against ' +
-        '<i>modelled</i> channels, not against Word, Gmail or a real PDF pipeline — that work is ' +
-        'not done. And a high score against an <span class="nb">attack</span> row is not a security ' +
-        'claim: spab does not claim resistance to deliberate removal, and neither should anything else here.</p>') } }),
+        '<li><b>Documents:</b> ' + D.scope.samples + ' fixed text samples, each at ' + D.scope.scales.length +
+        ' lengths (' + D.scope.scales.map(function (x) { return x + '×'; }).join(', ') + ') \u2014 ' +
+        (D.scope.docChars ? D.scope.docChars[0].toLocaleString() + ' to ' + D.scope.docChars[1].toLocaleString() +
+          ' characters' : '') + '. Every library gets the same ' +
+        (D.scope.samples * D.scope.scales.length) + ' documents.</li>' +
+        '<li><b>Secrets:</b> ' + D.scope.payloads + ' sizes' +
+        (D.scope.payloadList ? ' \u2014 ' + D.scope.payloadList.map(function (b) { return b + 'B'; }).join(', ') : '') +
+        ', from a short tag to a small program.</li>' +
+        '<li><b>Damage:</b> each model at its median intensity. The "what the test does" column states ' +
+        'that concretely, against a 2,000-character reference document.</li>' +
+        '<li><b>Cells</b> are the percentage of marks read back <i>exactly</i>. Hover for the trial count.</li>' +
+        '<li><b>Generated</b> ' + D.generated + ' from spab ' + D.spabVersion + ' by <code>comparisons/run.js</code>.</li>' +
+        '</ul>') } }),
 
-      { t: 'h3', a: { style: bw.s({ marginTop: '26px' }) }, c: 'Recovery by channel model' },
-      { t: 'p', a: { style: bw.s({ opacity: '.75', fontSize: '14px' }) },
-        c: 'Percentage of marks recovered intact. Hover a cell for the trial count. ' +
-           '"level" is the intensity the model was run at.' },
-      { t: 'div', a: { style: bw.s({ overflowX: 'auto' }) }, c: [
-        { t: 'table', a: { class: 'bw_table', style: bw.s({ width: '100%', fontSize: '13px' }) },
-          c: [{ t: 'thead', c: [head] }, { t: 'tbody', c: rows }] }] },
+      // -------- the one thing that explains most of the table --------
+      bw.makeCard({ title: 'Read this before the numbers: two different carriers', content: { t: 'div', a: { class: 'prose' }, c: bw.raw(
+        '<p>Most of the spread below is not about codec quality. It is about <b>which characters carry the ' +
+        'payload</b>, and there are two families here that fail in opposite ways.</p>' +
+        '<p><b>Insertion</b> — StegCloak, @vercel/stega, emoji-smuggle, zero-width-lib, and ' +
+        '<code>spab (zero-width)</code> — add invisible characters. Normalising whitespace does not touch them, ' +
+        'so they sail through <code>collapseWs</code>, <code>nfkc</code> and <code>reflow</code>. A sanitiser ' +
+        'that strips invisible characters removes them completely, which is the <code>stripZw</code> row. The ' +
+        'document also grows in bytes and the mark is plain in a hex dump.</p>' +
+        '<p><b>Substitution</b> — <code>spab (length-preserving)</code> — swaps existing characters for ' +
+        'identical-looking ones. The document stays <i>exactly</i> the same length and a diff shows nothing, ' +
+        'but normalising whitespace destroys the main carrier. That is why its <code>collapseWs</code> row is ' +
+        'near zero while every insertion row is at 100%.</p>' +
+        '<p>Both spab rows are the same codec with the same framing, checksum and error correction, differing ' +
+        'only in carrier. Compare like with like: <code>spab (zero-width)</code> against the insertion ' +
+        'libraries, and read <code>spab (length-preserving)</code> as a different trade rather than a worse ' +
+        'result.</p>') } }),
 
-      { t: 'h3', a: { style: bw.s({ marginTop: '30px' }) }, c: 'Does a damaged mark ever decode to the wrong payload?' },
-      { t: 'p', a: { style: bw.s({ opacity: '.75', fontSize: '14px' }) },
-        c: 'A different question from robustness, and arguably a more important one. ' +
-           'Losing a watermark is a non-answer; returning a different one is a false ' +
-           'provenance claim. The returned values are garbage rather than forged ' +
-           'watermarks — but a caller testing "did it decode?" cannot tell.' },
-      { t: 'div', a: { style: bw.s({ overflowX: 'auto' }) }, c: [
-        { t: 'table', a: { class: 'bw_table', style: bw.s({ width: '100%', fontSize: '13px' }) }, c: [
-          { t: 'thead', c: [{ t: 'tr', c: ['library', 'false positive', 'wrong payload', 'lost', 'recovered', 'example of a wrong return'].map(function (h, i) {
-            return { t: 'th', a: { style: bw.s({ textAlign: i === 0 || i === 5 ? 'left' : 'right' }) }, c: h }; }) }] },
-          { t: 'tbody', c: safety }] }] },
+      { t: 'h3', a: { style: bw.s({ marginTop: '28px', marginBottom: '4px' }) }, c: 'Recovery by test' },
+      { t: 'p', a: { style: bw.s({ opacity: '.7', fontSize: '13px', margin: '0 0 10px' }) },
+        c: 'Grouped by kind: ' +
+           Object.keys(KIND).map(function (k) { return KIND[k][0] + ' (' + KIND[k][2] + ')'; }).join('; ') + '.' },
+      { t: 'div', a: { style: bw.s({ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }) }, c: [
+        { t: 'span', a: { style: bw.s({ fontSize: '13px', opacity: '.7' }) }, c: 'sort by' },
+        // Hand-built rather than bw.makeSelect: that component ignores `onchange`
+        // entirely and renders each option's VALUE as its label, so a select built
+        // with it would be unlabelled and inert. The BCCL class is the same, so it
+        // looks identical to every other control on the page.
+        { t: 'select', a: { class: 'bw_bccl_form_control',
+            style: bw.s({ width: 'auto', minWidth: '190px', fontSize: '13px', padding: '4px 8px' }),
+            onchange: function (e) {
+              var v = e.target.value;
+              sortState.key = v || null;
+              sortState.dir = (v && v !== 'model') ? 'desc' : 'asc';
+              var host = document.getElementById('robustnessTable');
+              if (!host) return;
+              host.innerHTML = '';
+              host.appendChild(bw.DOM(bw.makeTable({ data: sortRows(rows), columns: columns,
+                striped: true, hover: true, sortable: false })));
+            } },
+          c: [{ t: 'option', a: { value: '' }, c: 'kind, then name' },
+              { t: 'option', a: { value: 'model' }, c: 'test name' }]
+            .concat(ran.map(function (l) {
+              return { t: 'option', a: { value: l.name }, c: l.name + ' (best first)' };
+            })) }
+      ] },
+      { t: 'div', a: { id: 'robustnessTable', style: bw.s({ overflowX: 'auto' }) },
+        c: [bw.makeTable({ data: sortRows(rows), columns: columns, striped: true, hover: true, sortable: false })] },
 
-      { t: 'h3', a: { style: bw.s({ marginTop: '30px' }) }, c: 'What was run' },
+      { t: 'h3', a: { style: bw.s({ marginTop: '32px', marginBottom: '4px' }) },
+        c: 'Does a damaged mark ever decode to the wrong payload?' },
+      { t: 'p', a: { style: bw.s({ opacity: '.7', fontSize: '13px', margin: '0 0 10px' }) },
+        c: 'A different question from robustness. Losing a watermark is a non-answer a caller can handle; ' +
+           'returning a different one is a false provenance claim they cannot. Measured at each model’s ' +
+           'worst intensity.' },
+      { t: 'div', a: { style: bw.s({ overflowX: 'auto' }) }, c: [bw.makeTable({
+        data: safetyRows, striped: true, hover: true, sortable: false,
+        columns: [
+          { key: 'lib', label: 'library' },
+          { key: 'fp', label: 'payload from unmarked text' },
+          { key: 'wrong', label: 'wrong payload',
+            render: function (v, r) {
+              return { t: 'span', a: { style: bw.s({ fontWeight: v ? '700' : '400',
+                color: v ? p.danger.base : 'inherit' }) }, c: v + (v ? '  (' + r.wrongPct + '%)' : '') };
+            } },
+          { key: 'lost', label: 'lost' },
+          { key: 'recovered', label: 'recovered' },
+          { key: 'example', label: 'example of a wrong return',
+            render: function (v) { return { t: 'span', a: { style: bw.s({ fontSize: '12px', opacity: '.7' }) }, c: v }; } }
+        ] })] },
+      { t: 'p', a: { style: bw.s({ fontSize: '13px', opacity: '.75', marginTop: '8px' }) },
+        c: 'The wrong returns are garbage strings, not forged watermarks — no library here can be made to ' +
+           'emit an attacker’s chosen payload. It is still a failure of the property, because a caller ' +
+           'testing "did it decode?" cannot tell the difference.' },
+
+      { t: 'h3', a: { style: bw.s({ marginTop: '32px' }) }, c: 'What was run' },
       { t: 'div', a: { class: 'grid2', style: bw.s({ gap: '14px', marginTop: '12px' }) },
         c: D.libraries.map(function (l) {
           return bw.makeCard({ title: l.name, content: { t: 'div', a: { class: 'prose', style: bw.s({ fontSize: '13px' }) }, c: bw.raw(
             '<p>' + l.technique + '</p>' +
+            (l.vendor ? '<p style="opacity:.7"><b>Vendor:</b> ' + l.vendor + '</p>' : '') +
             '<p><code>' + l.source + '</code>' + (l.ran ? '' : ' — <b>not run.</b> ' + l.install) + '</p>' +
             (l.limits ? '<p style="opacity:.75"><b>Caveat:</b> ' + l.limits + '</p>' : '')) } });
         }) },
 
-      { t: 'p', a: { style: bw.s({ marginTop: '24px', fontSize: '13px', opacity: '.7' }) },
-        c: 'Generated ' + D.generated + ' from spab ' + D.spabVersion + '. Scope: ' +
-           D.scope.samples + ' text samples x ' + D.scope.payloads + ' payload sizes x ' +
-           D.scope.scales.length + ' cover lengths x ' + D.models.length + ' channel models. ' +
-           'Source: comparisons/run.js in the repository.' }
+      // ---- summary: several axes, never one score ----
+      { t: 'h3', a: { style: bw.s({ marginTop: '34px', marginBottom: '4px' }) }, c: 'Summary' },
+      { t: 'p', a: { style: bw.s({ opacity: '.75', fontSize: '13.5px', margin: '0 0 12px' }) },
+        c: 'There is no single "best" row. What a library is good at follows from its carrier and ' +
+           'from whether it does any coding on top, so the axes are kept apart. The three named ' +
+           'columns are the decisive single tests.' },
+      { t: 'div', a: { style: bw.s({ overflowX: 'auto' }) }, c: [bw.makeTable({
+        striped: true, hover: true, sortable: false,
+        data: ran.map(function (l) {
+          var byModel = function (m) {
+            var row = D.models.filter(function (x) { return x.model === m; })[0];
+            if (!row) return null;
+            var r = row.results.filter(function (x) { return x.lib === l.name; })[0];
+            return r && r.pct !== null ? r.pct : null;
+          };
+          var mean = function (kind) {
+            var vals = D.models.map(function (row) {
+              var c = (D.catalog || []).filter(function (x) { return x.name === row.model; })[0];
+              if (!c || c.kind !== kind) return null;
+              var r = row.results.filter(function (x) { return x.lib === l.name; })[0];
+              return r && r.pct !== null ? r.pct : null;
+            }).filter(function (v) { return v !== null; });
+            return vals.length ? Math.round(vals.reduce(function (a, b) { return a + b; }, 0) / vals.length) : null;
+          };
+          var saf = D.safety.filter(function (x) { return x.lib === l.name; })[0] || {};
+          var tot = (saf.wrong || 0) + (saf.lost || 0) + (saf.recovered || 0);
+          return { lib: l.name, vendor: l.vendor || '?', carrier: l.family || '?',
+            lp: l.lengthPreserving ? 'yes' : 'no', integ: l.integrity ? 'yes' : 'no',
+            ordinary: mean('channel'), attack: mean('attack'),
+            collapseWs: byModel('collapseWs'), stripZw: byModel('stripZw'),
+            sanitisePaste: byModel('sanitisePaste'),
+            wrong: tot ? Math.round(100 * (saf.wrong || 0) / tot) : 0 };
+        }),
+        columns: [
+          { key: 'lib', label: 'library' },
+          { key: 'vendor', label: 'vendor' },
+          { key: 'carrier', label: 'carrier' },
+          { key: 'lp', label: 'length-preserving' },
+          { key: 'integ', label: 'integrity check' },
+          { key: 'ordinary', label: 'ordinary handling',
+            render: function (v) { return pctCell(v === null ? null : { pct: v, ok: 0, tot: 0 }); } },
+          { key: 'attack', label: 'deliberate attack',
+            render: function (v) { return pctCell(v === null ? null : { pct: v, ok: 0, tot: 0 }); } },
+          { key: 'collapseWs', label: 'whitespace normalised',
+            render: function (v) { return pctCell(v === null ? null : { pct: v, ok: 0, tot: 0 }); } },
+          { key: 'stripZw', label: 'invisibles stripped',
+            render: function (v) { return pctCell(v === null ? null : { pct: v, ok: 0, tot: 0 }); } },
+          { key: 'sanitisePaste', label: 'both at once',
+            render: function (v) { return pctCell(v === null ? null : { pct: v, ok: 0, tot: 0 }); } },
+          { key: 'wrong', label: 'wrong payload',
+            render: function (v) {
+              return { t: 'span', a: { style: bw.s({ fontWeight: v ? '700' : '400',
+                color: v ? p.danger.base : 'inherit' }) }, c: v + '%' };
+            } }
+        ] })] },
+      { t: 'p', a: { style: bw.s({ fontSize: '13px', opacity: '.75', marginTop: '8px' }) },
+        c: '"both at once" is a rich-text editor or CMS paste filter — it collapses whitespace AND ' +
+           'strips invisible characters. Testing those separately flatters every scheme here, ' +
+           'because each family survives one of them. If provenance is what you care about, weigh ' +
+           '"wrong payload" above all the recovery columns.' },
+
+      { t: 'h4', a: { style: bw.s({ marginTop: '22px', marginBottom: '6px' }) }, c: 'Which to choose' },
+      { t: 'div', a: { style: bw.s({ overflowX: 'auto' }) }, c: [bw.makeTable({
+        striped: true, sortable: false,
+        data: ran.map(function (l) { return { lib: l.name, when: l.bestFor || '—' }; }),
+        columns: [{ key: 'lib', label: 'library' }, { key: 'when', label: 'choose it when' }] })] },
+
+      // ---- what could not be measured ----
+      { t: 'h3', a: { style: bw.s({ marginTop: '34px', marginBottom: '4px' }) },
+        c: 'Known implementations not in the table' },
+      { t: 'p', a: { style: bw.s({ opacity: '.75', fontSize: '13.5px', margin: '0 0 12px' }) },
+        c: 'A comparison that silently omits what it could not run reads as a survey. These are ' +
+           'the systems this project knows of, and why each is absent.' },
+      { t: 'div', a: { style: bw.s({ overflowX: 'auto' }) }, c: [bw.makeTable({
+        striped: true, sortable: false,
+        data: (D.known || []).map(function (k) {
+          return { name: k.name, vendor: k.vendor, lang: k.lang, status: k.status, why: k.why };
+        }),
+        columns: [
+          { key: 'name', label: 'implementation' },
+          { key: 'vendor', label: 'vendor' },
+          { key: 'lang', label: 'language' },
+          { key: 'status', label: 'status',
+            render: function (v) {
+              return bw.makeBadge({ text: v, variant: /out of scope/.test(v) ? 'light' : 'warning' });
+            } },
+          { key: 'why', label: 'why',
+            render: function (v) { return { t: 'span', a: { style: bw.s({ fontSize: '12.5px', opacity: '.85' }) }, c: v }; } }
+        ] })] },
+
+      bw.makeCard({ title: 'How to read this, and how not to', content: { t: 'div', a: { class: 'prose' }, c: bw.raw(
+        '<p>This benchmark is published by spab, which is a reason to be skeptical of it. The mitigations are ' +
+        'structural rather than promises: every library runs the same corpus and the same damage from the same ' +
+        'code path; rows are grouped by kind and sorted by name, never by who wins; spab’s losses are ' +
+        'coloured on the same scale as its wins; a library that was not run shows <b>n/a</b>, never 0%; and the ' +
+        'source is <code>comparisons/run.js</code> in the repository. Re-run it — if your numbers disagree with ' +
+        'these, trust yours.</p>' +
+        '<p><b>What it cannot tell you.</b> These are <i>modelled</i> channels, not Microsoft Word, Gmail or a ' +
+        'real PDF pipeline; that work is not done. Recovery also depends heavily on spare capacity, and these ' +
+        'are fixed samples at ' + D.scope.scales.length + ' lengths. And a strong score on an ' +
+        '<span class="nb">attack</span> row is not a security claim — spab does not claim resistance to ' +
+        'deliberate removal, and neither should anything else here.</p>') } })
     ] };
   }
 

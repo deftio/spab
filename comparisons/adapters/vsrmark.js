@@ -20,6 +20,11 @@ function run(args, input) {
 }
 module.exports = {
   name: 'VSRMark',
+  family: 'insertion',
+  lengthPreserving: false,
+  integrity: false,
+  bestFor: 'very high density with damage detection but no repair',
+  vendor: 'VSRMark project',
   technique: 'Unicode variation selectors, ~1 payload byte per carrier; framing + CRC, no ECC',
   url: 'https://github.com/vsrmark',
   install: 'build from source, then set VSRMARK_BIN',

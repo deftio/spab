@@ -245,10 +245,20 @@ if (JS_PATH) {
   DATA.spabVersion = require('../src/js/spab.js').VERSION;
   DATA.libraries = ADAPTERS.map(a => ({
     name: a.name, source: a.source, technique: a.technique, url: a.url,
+    vendor: a.vendor || null, family: a.family || null,
+    lengthPreserving: !!a.lengthPreserving, integrity: !!a.integrity,
+    bestFor: a.bestFor || null,
     ran: live.indexOf(a) >= 0, install: a.install, limits: a.limits || null
   }));
+  DATA.known = require('./known-implementations.js');
+  var lens = [];
+  samples.forEach(function (x) { SCALES.forEach(function (k) { lens.push(x.text.length * k); }); });
   DATA.scope = { samples: samples.length, payloads: payloads.length, scales: SCALES,
-    models: Object.keys(MODELS).length };
+    models: Object.keys(MODELS).length,
+    docChars: [Math.min.apply(null, lens), Math.max.apply(null, lens)],
+    secretBytes: [Math.min.apply(null, payloads.map(function (x) { return x.bytes; })),
+                  Math.max.apply(null, payloads.map(function (x) { return x.bytes; }))],
+    payloadList: payloads.map(function (x) { return x.bytes; }) };
   DATA.catalog = Object.keys(MODELS).map(describe);
   fs.mkdirSync(path.dirname(JS_PATH), { recursive: true });
   fs.writeFileSync(JS_PATH,

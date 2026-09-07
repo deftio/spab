@@ -1,15 +1,27 @@
 /*
- * A plain zero-width encoder with no framing, no integrity and no ECC — the
- * technique at its most basic. Useful as the floor: it shows what the carrier alone
- * gives you before any communications engineering is added.
+ * zero-width-lib — a plain zero-width encoder: map the payload to invisible
+ * characters, insert them, read them back. No framing, no integrity check, no error
+ * correction.
+ *
+ * This is the CONTROL ROW, and it is here to answer a specific question: how much of
+ * a library's robustness comes from its carrier, and how much from the machinery
+ * built on top? Everything else in this table adds something — compression,
+ * encryption, an HMAC, a checksum, ECC. This adds nothing. Whatever it scores is
+ * what the zero-width carrier gives you for free, and every other row should be read
+ * as a delta against it.
  */
 'use strict';
 let ZW = null;
 try { ZW = require('zero-width-lib'); } catch (e) { ZW = null; }
 
 module.exports = {
-  name: 'zero-width (bare)',
-  technique: 'zero-width insertion, no framing, no integrity, no ECC',
+  name: 'zero-width-lib',
+  family: 'insertion',
+  lengthPreserving: false,
+  integrity: false,
+  bestFor: 'nothing — it is the control row, showing what the bare carrier gives you',
+  vendor: 'community (zero-width-lib)',
+  technique: 'CONTROL: raw zero-width insertion — no framing, no integrity, no ECC. What the carrier alone gives you.',
   url: 'https://www.npmjs.com/package/zero-width-lib',
   install: 'npm i zero-width-lib',
   limits: 'no integrity check, so a damaged mark can decode to a WRONG payload rather than none',

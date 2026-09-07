@@ -127,8 +127,19 @@ Applied in this order, and undone in reverse:
   at one copy against 57% at five to eight. Any table that averages across cover
   lengths describes neither case.
 - **RLNC** (`ecc: 'rlnc'`) — a GF(256) systematic random-linear fountain. Each packet
-  is `[esi|esi|value|crc]`, 32 bits, self-checking and self-locating, and packets pool
-  across channels. Needs **K linearly independent** packets, not merely K.
+  is `[esi][data][crc]`, self-checking and self-locating, and packets pool across
+  carrier channels. Needs **K linearly independent** packets, not merely K.
+- **Geometry** — how a fountain packet divides its bits. `params.rlncGeom` selects one
+  of `v1` (16/8/8), `default` (8/16/8), `wide` (16/32/16) or `widest`. Only the data
+  field is byte-aligned; the index and check are bit fields and never enter GF(256).
+  **Packet width is not free**: the modem groups sites into 32-bit blocks, so a packet
+  wider than a block cannot be realigned by the resync sweep — desync recovery falls
+  from 20% at 32 bits to 1% at 40.
+- **ESI** — encoding symbol id. `esi < K` is *systematic* (the data is source symbol
+  `esi` verbatim); `esi ≥ K` is a *repair* equation, a random GF(256) combination.
+  The coefficients are a pure function of `esi`, so the same id always encodes the
+  same equation — which is why the id may **wrap** once the space is exhausted: a
+  wrapped packet is a duplicate copy, not a conflicting equation.
 - **Erasure vs error** — an *erasure* is a lost symbol at a known position; an *error*
   is a wrong symbol at an unknown one. Erasures are much cheaper to repair.
 - **Desync** — an insertion or deletion that shifts every symbol after it. The hardest
