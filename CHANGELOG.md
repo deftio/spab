@@ -25,6 +25,21 @@ Robustness release, on top of the v2 wire format shipped in 0.5.0.
   front is a shift no 32-phase sweep can undo). Keyed structural recovery is
   **27% -> 98%**, level with unkeyed. **This changes how keyed marks are written:**
   a keyed mark from 0.5.0 does not decode here.
+- **A channel returning `unsupported` could mask a channel that recovered the payload.**
+  `decode()` compares channels with a rank table, and 0.5.0 added `unsupported`,
+  `encrypted`, `auth-failed` and `corrupt` without ranking them. An unranked status
+  compares as `undefined`, every comparison against it is false, and the first channel
+  examined wins by default — so a `ws` channel returning a located, checksum-valid
+  packet it could not open silently blocked the `zwsp` channel's `perfect` result.
+  Encode reported five copies and no issues; decode returned `null`.
+
+  Found by the new capacity sweep at a 100 KB cover with a 4 KB payload, which is why
+  it survived the whole test suite: it needs a cover large enough for auto-grow to
+  engage while the substitution channels hold a truncated copy. Ranking now covers
+  every status, a recovered payload outranks everything that is not one, and
+  `tests/branches.test.js` asserts that every status the codec emits is ranked —
+  scanning the source for both `status:` and `fail:` literals, because a reproduction
+  at that size is too slow for the suite.
 - **The histogram detector's only test was vacuous.** `histogram()` had exactly one
   assertion — `total === sum(counts)` — which is self-consistent by construction and
   would pass if the function counted nothing, counted the wrong characters, or put
@@ -41,6 +56,33 @@ Robustness release, on top of the v2 wire format shipped in 0.5.0.
 
 ### Added
 
+- **A research measurement surface**, kept firmly apart from CI. `tests/` proves the
+  implementation works with binary assertions that must never regress; `r_and_d/`
+  measures how well it works, gates nothing, and every number there moves when the
+  codec moves. Neither is fast and neither is meant to be — they run periodically, and
+  a benchmark that samples its own matrix reports a figure nobody can reproduce.
+  - **`npm run attacks`** — a documented catalogue of all 27 channel models: what each
+    does, the real situation it stands in for, and which carriers it damages. A model
+    with no entry **fails the benchmark** rather than appearing as an unlabelled row.
+  - **`npm run benchmark`** — capacity, redundancy achieved, recovery per channel
+    **split by redundancy band**, the degradation curve, the safety invariants and
+    encode/decode cost. Redundancy is a separate axis because the same model reads 0%
+    on a passage that fits one copy and 100% on one that fits eight; averaging those
+    describes neither.
+  - **`npm run capacity`** — how big a secret fits in how much text, from 50 characters
+    to a megabyte of cover against payloads from 4 bytes to a megabyte, in both
+    length-preserving and auto-grow modes. Headline: substitution carriers top out near
+    **40 bytes per kilobyte of prose at one copy**, and that is a property of English
+    rather than of the codec.
+  - **`npm run comparisons`** — spab against other published libraries on the same
+    corpus and the same damage. Lives in `comparisons/` with its own `package.json`,
+    because it needs third-party packages and spab has none. A library that is not
+    installed is a **skipped row, never a zero**.
+- **A `/robustness` page** rendering those results, generated from the runner rather
+  than typed. Rows sort alphabetically by model, spab's losses use the same colour
+  scale as its wins, and the page states plainly that spab publishes it, that it
+  measures modelled channels rather than Word or Gmail, and that a good score on an
+  `attack` row is not a security claim.
 - **`SPAB.detect(text, params)` — the sliding histogram detector.** Reports, per
   carrier class, a *likelihood field*: a window slid over the carrier sites with the
   histogram and a marked-ness score at each position, plus per-site posteriors and a

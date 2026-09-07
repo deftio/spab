@@ -154,6 +154,35 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) (invariants, dev setup, branching & mer
 [`CHANGELOG.md`](CHANGELOG.md) for the release history. spab has **zero runtime and dev
 dependencies**; tooling like bitwrench is fetched on demand via `npx`, never added to the dep list.
 
+## Measuring it
+
+Two different activities, kept apart on purpose:
+
+**`tests/` proves it works.** Binary assertions that must never regress — round-trips
+hold, nothing throws, unmarked text yields nothing, and a damaged mark never returns a
+*different* payload. Percentages are reported there, never asserted. This is what CI
+gates on.
+
+**`r_and_d/` measures how well it works, and where it does not.** Nothing here gates
+anything and every number moves when the codec moves.
+
+```bash
+npm run attacks          # the catalogue: 27 channel models, what each stands in for
+npm run benchmark        # capacity, redundancy, recovery per channel, safety, cost
+npm run capacity         # how big a secret fits in how much text (bytes to megabytes)
+npm run comparisons      # spab against other libraries on the same channel
+```
+
+Reports land in [`r_and_d/reports/`](r_and_d/reports/). The comparison against other
+libraries lives in [`comparisons/`](comparisons/) and is deliberately separate: it
+needs third-party packages, and spab itself has none. Results are rendered at
+[deftio.github.io/spab/pages/#/robustness](https://deftio.github.io/spab/pages/#/robustness).
+
+Two things those tables will tell you that a marketing page would not: spab loses
+outright to whitespace normalisation, reflow and text extraction — those destroy its
+main carrier — and it does not claim resistance to deliberate removal by someone who
+knows the scheme.
+
 ## License
 
 BSD 2-Clause — see [`LICENSE`](LICENSE). © 2026 M. A. Chatterjee (deftio).

@@ -579,6 +579,38 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
   ok(res.metadata.crcOk !== true, 'scanner: spurious MAGIC does not report a valid CRC');
 })();
 
+// -- every status a channel can return must be RANKED --
+//
+// decode() picks between channels with a rank table. An unranked status compares as
+// undefined, every comparison against it is false, and the first channel examined
+// wins by default — silently. That is not hypothetical: 0.5.0 added `unsupported`,
+// `encrypted`, `auth-failed` and `corrupt` without ranking them, so a `ws` channel
+// returning `unsupported` (a located, checksum-valid packet the build could not
+// open) blocked the `zwsp` channel's `perfect` result. Encode reported five copies
+// and no issues; decode returned null. Found by r_and_d/capacity.js at a 100K cover,
+// which is too slow to reproduce here — so this asserts the PROPERTY instead.
+(function () {
+  const fs = require('fs');
+  const src = fs.readFileSync(require('path').join(__dirname, '..', 'src', 'js', 'spab.js'), 'utf8');
+  // Statuses reach the caller two ways: written directly as `status: 'x'`, or
+  // returned by openContent as `fail: 'x'` and copied onto the result.
+  const emitted = new Set();
+  for (const m of src.matchAll(/status:\s*'([a-z-]+)'/g)) emitted.add(m[1]);
+  for (const m of src.matchAll(/fail:\s*'([a-z-]+)'/g)) emitted.add(m[1]);
+  const rank = SPAB.algorithm.statusRank;
+  ok(!!rank, 'the status rank table is exported for inspection');
+  const unranked = [...emitted].filter(st => !(st in rank));
+  ok(unranked.length === 0, 'every status the codec emits is ranked (unranked: ' + (unranked.join(', ') || 'none') + ')');
+  ok(emitted.size >= 6, 'the scan found the statuses it is meant to check (' + emitted.size + ' found)');
+  // A recovered payload must outrank everything that is not one, or a channel that
+  // merely located a packet can mask a channel that opened it.
+  ok(rank.perfect > rank.encrypted && rank.corrected > rank.encrypted,
+    'a recovered payload outranks a located-but-unopened one');
+  ok(rank.encrypted > rank.failed && rank.unsupported > rank.failed,
+    'a located, checksum-valid packet outranks a failed checksum');
+  ok(rank.failed > rank['not-detected'], 'a failed checksum outranks nothing at all');
+})();
+
 // -- browser-global branch of the IIFE wrapper (root = window) --
 (function () {
   const path = require('path');

@@ -1,0 +1,15 @@
+{
+  "name": "spab-comparisons",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Benchmark spab against other text-watermarking libraries, side by side. Not published; not part of spab's dependency-free surface.",
+  "license": "BSD-2-Clause",
+  "scripts": {
+    "bench": "node run.js",
+    "report": "node run.js --md ../r_and_d/reports/comparisons.md"
+  },
+  "optionalDependencies": {
+    "stegcloak": "^1.1.1",
+    "zero-width-lib": "^1.1.0"
+  }
+}

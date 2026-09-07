@@ -1556,6 +1556,20 @@
     return { status: 'failed', message: null, confidence: 0, crcOk: false, packets: count, channel: 'rlnc' };
   }
 
+  // How channels are compared when more than one returns something. Exported as
+  // `algorithm.statusRank` so a test can assert that every status the codec emits is
+  // ranked — an unranked status compares as undefined, every comparison against it
+  // is false, and the first channel examined silently wins.
+  var STATUS_RANK = {
+    perfect: 6, corrected: 5,        // payload in hand
+    encrypted: 4,                    // located, verified, needs a key
+    'auth-failed': 3,                // located, verified, wrong key
+    unsupported: 2,                  // located, verified, algorithm not implemented
+    corrupt: 2,                      // located, verified, content would not open
+    failed: 1,                       // something was there, checksum did not hold
+    'not-detected': 0
+  };
+
   // ---------- decode ----------
   // Try each enabled class independently; return the best-decoding channel.
   function decode(text, params) {
@@ -1578,7 +1592,23 @@
         checksum: r.checksum, checksumBits: r.checksumBits, detail: r.detail,
         messageBytes: r.messageBytes, bytes: r.bytes } };
     }
-    var rank = { perfect: 3, corrected: 2, failed: 1, 'not-detected': 0 };
+    // Channel ranking — see STATUS_RANK. EVERY status a channel can return must appear
+    // there: an
+    // unranked status compares as undefined, every comparison against it is false,
+    // and the first channel examined wins by default.
+    //
+    // That is exactly what happened. 0.5.0 added `unsupported`, `encrypted`,
+    // `auth-failed` and `corrupt` without adding them here, so a `ws` channel
+    // returning `unsupported` — a located, checksum-valid packet this build could
+    // not open — silently blocked the `zwsp` channel's `perfect` result later in the
+    // list. Encode reported five copies and no issues; decode returned null. Found
+    // by r_and_d/capacity.js at a 100K cover with a 4KB payload.
+    //
+    // The ordering that matters: a channel that RECOVERED A PAYLOAD always beats one
+    // that did not, whatever else it reports. Below that, a located-but-unopenable
+    // packet beats nothing at all, because it is real information for the caller.
+    var rank = STATUS_RANK;
+    var hasMessage = function (c) { return c && c.message !== null && c.message !== undefined; };
     var best = null, bestId = null;
     ids.forEach(function (id) {
       var c = foldParse(readClassBits(text, id, key, maxSites), params);
@@ -1587,10 +1617,19 @@
       // intact copies together with noise. A single self-contained packet is enough
       // on its own — it carries its own checksum — so go looking for one.
       if (!c.crcOk) { var r = scanFrame(text, id, key, maxSites, params); if (r) c = r; }
+      // A recovered payload wins outright — crcOk alone is not enough, because a
+      // packet can verify and still fail to open.
+      // The `undefined -> 0` fallbacks are unreachable: tests/branches.test.js asserts
+      // every emitted status is ranked. They stay because if that ever stops being
+      // true, an unranked status should sort LAST — which cannot mask a channel that
+      // recovered a payload — rather than compare as undefined and win by accident,
+      // which is the bug this whole block exists to prevent.
+      var cRank = rank[c.status] === undefined ? 0 : rank[c.status];   // cov-ignore: see above
+      var bRank = best ? (rank[best.status] === undefined ? 0 : rank[best.status]) : -1;   // cov-ignore: see above
       var better = !best ||
-        (c.crcOk && !best.crcOk) ||
-        (c.crcOk === best.crcOk && (rank[c.status] > rank[best.status] ||
-          (rank[c.status] === rank[best.status] && c.confidence > best.confidence)));
+        (hasMessage(c) && !hasMessage(best)) ||
+        (hasMessage(c) === hasMessage(best) && (cRank > bRank ||
+          (cRank === bRank && c.confidence > best.confidence)));
       if (better) { best = c; bestId = id; }
     });
     if (!best) return { message: null, metadata: { status: 'not-detected', confidence: 0 } };
@@ -1809,6 +1848,7 @@
     },
     modem: { type: 'mixed-radix', blocked: true, blockCapBits: 32, note: 'ECC bit stream is packed into per-site carrier symbols by blocked mixed-radix (base) conversion, recovering fractional bits of non-power-of-two radices; blocks bound a damaged symbol to ≤32 bits' },
     coding: { symbolLayer: 'mixed-radix (blocked)', blocks: true, interleave: 'keyed (opt-in)', pn: 'keyed (opt-in)', softDecision: false },
+    statusRank: STATUS_RANK,
     resync: {
       phases: MAX_PHASE,
       note: 'Inserting or deleting a carrier site shifts the whole symbol stream, so blocks are cut one position off and everything after the edit decodes to noise — redundancy does not help, because every copy shifts together. The decoder therefore re-cuts the block grid at each phase: RLNC pools packets from all phases (32-bit aligned, so chance CRC hits stay out of the solve), and repetition falls back to scanning for one intact self-contained packet when majority folding fails. Disabled when a key is set: the keyed interleave spans the whole stream and cannot be undone on a shifted one.'

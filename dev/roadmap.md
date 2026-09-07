@@ -223,6 +223,30 @@ is a permutation repeating every 32 digits, which is weaker than a global one; `
 is documented as a cost multiplier rather than confidentiality and `encKey`
 (AES-256-GCM) is the real confidentiality mechanism, so this is the right trade.
 
+### Mixed carriers for large payloads — **open**
+
+Auto-grow today is the crude version of the right idea: when a payload will not fit,
+raise zero-width density until it does. That pushes one carrier to its limit and
+inherits that carrier's single failure mode — a sanitiser that strips invisible
+characters takes the whole mark.
+
+The designed version splits the payload across carriers by what each is good at:
+**dense zero-width insertion for bulk**, where capacity is set by density rather than
+by the text, and **length-preserving substitution for the part that must survive**,
+where capacity is scarce but the mark survives an invisible-character scrub. A
+fountain code across both means the substitution carriers alone can reconstruct a
+short payload — an identifier, say — even when every zero-width character is gone,
+while the bulk rides the dense channel when the channel is intact.
+
+Measured motivation, from `npm run capacity`: substitution tops out near 40 bytes per
+kilobyte of prose at one copy and is a property of English, not of the codec. Auto-grow
+clears that by orders of magnitude but abandons length preservation, which is the
+property most callers came for. Neither operating point is right for a large payload
+that also has to survive; the mix is.
+
+Depends on the sliding histogram detector for the soft output that would let a
+fountain decoder weigh the two channels differently.
+
 ### Block size is a robustness knob nobody is turning — **open**
 
 Mixed-radix conversion mixes every site in a block into every bit of that block, so

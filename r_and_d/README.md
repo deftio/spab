@@ -196,3 +196,24 @@ deliberately simple, and the numbers reflect it:
 
 Use these as the baseline curve to beat as better ECC lands behind the same
 `encode`/`decode` interface.
+
+## The measurement surface
+
+| command | what it answers |
+|---|---|
+| `npm run attacks` | What is being tested. All 27 channel models, what each does, and the real situation it stands in for. A model with no catalogue entry fails the benchmark rather than appearing as an unlabelled row. |
+| `npm run benchmark` | How spab behaves: capacity, redundancy achieved, recovery per channel **split by redundancy**, the degradation curve, the safety invariants, and encode/decode cost. |
+| `npm run capacity` | How big a secret fits in how much text, from 50 characters to a megabyte against payloads from 4 bytes to a megabyte, in both length-preserving and auto-grow modes. |
+| `npm run comparisons` | The same channel, against other published libraries. Lives in `comparisons/` because it needs third-party packages. |
+
+None of these are fast and none are meant to be. They run periodically, not in CI, and
+a benchmark that samples its own matrix reports a number nobody can reproduce. Expect
+minutes.
+
+### Why recovery figures here differ from a headline number
+
+Recovery depends far more on **redundancy** than on the channel. The same model reads
+0% on a passage that fits one copy and 100% on one that fits eight, so any table that
+averages across cover lengths describes neither case. The benchmark reports redundancy
+bands as separate columns for that reason, and the capacity report exists so the
+redundancy a given document affords is knowable in advance.
