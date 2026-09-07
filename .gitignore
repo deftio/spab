@@ -20,6 +20,3 @@ build/
 dist/
 __pycache__/
 *.pyc
-
-# scratch artifacts from scripts run with an unset path variable
-undefined/
