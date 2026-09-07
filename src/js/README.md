@@ -384,10 +384,11 @@ carrier sites, zero-width count and the decode result together as JSON.
 
 ### Metadata
 
-`status` is `perfect`, `corrected`, `failed`, `not-detected`, or — new in 0.5.0 —
-`encrypted` (found, no key), `auth-failed` (wrong key), `unsupported` (an algorithm
-this build does not implement) and `corrupt`. All four of the new ones mean *a packet
-was located and verified*, which is a different fact from nothing being there.
+`status` is one of `perfect`, `corrected`, `encrypted`, `auth-failed`, `unsupported`,
+`corrupt`, `failed`, `not-detected` — listed in the order the decoder ranks them, so a
+recovered payload always beats a merely located one. The four middle values mean *a
+packet was located and its checksum verified*, which is a different fact from nothing
+being there. Full definitions in [`docs/glossary.md`](https://github.com/deftio/spab/blob/main/docs/glossary.md#status-words-decodemetadatastatus).
 
 Every decode also returns `type`, `compression`, `encryption`, `encrypted`,
 `checksum`, `checksumBits`, `wireVersion`, `payloadBytes` (stored) and `messageBytes`
@@ -412,7 +413,7 @@ A decode only returns a message when the packet's checksum verifies.
 ```js
 SPAB.version()
 // {
-//   version: '0.5.0', name: '@deftio/spab', wireFormat: 2,
+//   version: '0.5.1', name: '@deftio/spab', wireFormat: 2,
 //   algorithm: 'plugsym-rep+rlnc',
 //   carriers: ['ws','apos','hyphen','wsdense','zwsp'],
 //   defaultCarriers: ['ws','apos','hyphen'],

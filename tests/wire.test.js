@@ -853,6 +853,70 @@ console.log('\n-- 13. the specification matches the implementation --');
   eq(f.version, 2, 'and the descriptor agrees');
 })();
 
+// The glossary is normative vocabulary, and the previous one rotted: it described a
+// frame retired two formats earlier, called the type field "2-3 bits" when it is 5,
+// and named Reed-Solomon as the baseline code when the codec uses RLNC. Nothing
+// caught it because nothing checked it. These assert the claims that CAN be checked.
+(function () {
+  const G = fs.readFileSync(path.join(__dirname, '..', 'docs', 'glossary.md'), 'utf8');
+
+  // Every status the codec ranks must appear in the status table, and no status the
+  // glossary invents may be absent from the codec — the old one listed `tampered`,
+  // which has never existed.
+  const ranked = Object.keys(SPAB.algorithm.statusRank);
+  for (const st of ranked) {
+    ok(G.indexOf('`' + st + '`') > 0, 'the glossary documents status ' + st);
+  }
+  const claimed = [...new Set([...G.matchAll(/^\| `([a-z-]+)` \|/gm)].map(m => m[1]))];
+  const invented = claimed.filter(c => ranked.indexOf(c) < 0);
+  eq(invented, [], 'the glossary invents no status the codec does not emit');
+
+  // Payload types.
+  for (const t of Object.keys(SPAB.TYPES)) {
+    if (t === 'extended') continue;
+    ok(G.indexOf('`' + t + '`') > 0, 'the glossary documents payload type ' + t);
+  }
+  // Carrier classes and their radices.
+  for (const id of Object.keys(SPAB.CLASS_DEFS)) {
+    ok(G.indexOf('`' + id + '`') > 0, 'the glossary documents carrier class ' + id);
+  }
+  ok(G.indexOf('`ws` = 4') > 0 && G.indexOf('`wsdense` = 8') > 0,
+    'the glossary states the radices the carriers actually have');
+
+  // Field widths, stated as numbers the descriptor can confirm.
+  ok(G.indexOf('**5-bit**') > 0, 'the glossary states the type field width');
+  ok(G.indexOf('17-bit fixed header') > 0 || G.indexOf('17 bits') > 0,
+    'the glossary states the fixed header width');
+  eq(SPAB.algorithm.frame.fixedHeaderBits, 17, 'and the descriptor agrees');
+  // Checksum exponent mapping.
+  ok(/0 . 8, 1 . 16, 2 . 32/.test(G) || G.indexOf('8 << n') > 0,
+    'the glossary states the checksum exponent rule');
+  eq(W.cksumBits(0), 8, 'exponent 0 really is 8 bits');
+  eq(W.cksumBits(5), 256, 'exponent 5 really is 256 bits');
+
+  // Claims the retired glossary got wrong, asserted so they cannot come back.
+  ok(G.indexOf('no magic number') > 0, 'the glossary says there is no magic number');
+  ok(G.indexOf('0xA5') < 0, 'the retired magic constant is absent from the glossary');
+  ok(G.indexOf('Reed') < 0 && G.indexOf('Reed-Solomon') < 0,
+    'the glossary does not name a code the codec never used');
+  ok(G.indexOf('`tampered`') < 0, 'the glossary does not document a status that never existed');
+  ok(G.indexOf('0.5.1') > 0 || G.indexOf(SPAB.VERSION) > 0, 'the glossary is version-stamped');
+})();
+
+// A version printed in a README goes stale the moment the version moves, and nobody
+// notices because nothing reads it. This does.
+(function () {
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'README.md'), 'utf8');
+  const shown = /version: '([\d.]+)'/.exec(readme);
+  ok(!!shown, 'the README shows a version() example');
+  eq(shown[1], SPAB.VERSION, 'the version in the README example matches the library');
+  eq(require('../src/js/package.json').version, SPAB.VERSION, 'and so does package.json');
+  // Every status the decoder can return must be listed for the caller.
+  for (const st of Object.keys(SPAB.algorithm.statusRank)) {
+    ok(readme.indexOf('`' + st + '`') > 0, 'the README documents status ' + st);
+  }
+})();
+
 const SPEC = fs.readFileSync(path.join(__dirname, '..', 'dev', 'wire-format.md'), 'utf8');
 ok(/version\s*:\s*3/.test(SPEC) && /type\s*:\s*5/.test(SPEC) && /comp\s*:\s*3/.test(SPEC) &&
    /enc\s*:\s*3/.test(SPEC) && /cksum\s*:\s*3/.test(SPEC), 'the spec states the five fixed-header widths');

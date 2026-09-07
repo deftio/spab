@@ -139,6 +139,23 @@ Robustness release, on top of the v2 wire format shipped in 0.5.0.
 - **The determinism claim now states its exception**: identical output for identical
   *explicit* params, except that encryption draws a fresh nonce when `params.nonce`
   is absent.
+- **`docs/glossary.md` — the shared vocabulary, rewritten and now tested.** Carriers,
+  the packet layout, transforms, ECC, the soft layer and every status word, with
+  diagrams where a definition alone does not carry it. The old glossary had rotted
+  badly: it documented a `[magic][len][content][crc]` frame two formats after that
+  frame was retired, called the type field "2–3 bits" when it is 5, named
+  Reed–Solomon as the baseline code when the codec has never used one, and listed a
+  `tampered` status that never existed. `tests/wire.test.js` now asserts the glossary
+  against the implementation — every ranked status documented, no status invented,
+  every payload type and carrier class present, the field widths and checksum
+  exponents correct, and the retired magic constant absent. A glossary nobody tests
+  is a glossary that lies eventually.
+- **`r_and_d/docs/glossary.md` is now scoped to research vocabulary** — terms for
+  schemes proposed, exploratory or deliberately not built — with a pointer to the
+  shipping one. Splitting them is what stops the shipping half rotting again.
+- **README version drift is a test.** The `version()` example in `src/js/README.md`,
+  `package.json` and `SPAB.VERSION` must agree, and the README must document every
+  status the decoder can return.
 - **Two architecture reviews added under `dev/`** — `spab_0.5_review.md` (spab in the
   text-watermarking landscape, with a gap analysis) and
   `spab_0.5.0_world_architecture_recommendations.md` (what a sliding-histogram

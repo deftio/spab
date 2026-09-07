@@ -50,7 +50,12 @@ rest of the planned work (compact binary JSON, ChaCha20-Poly1305) is tracked in
 
 A build reports what it can do — `SPAB.version()` or `spab version` gives the library
 version, the wire format it reads, and the carriers, types, compression and encryption
-code points it actually implements (as opposed to the ones the format registers).
+code points it actually implements (as opposed to the ones the format registers). Ask
+the build rather than trusting a document; that is what it is for.
+
+Vocabulary used throughout — carriers, packet fields, transforms, status words — is
+defined in [`docs/glossary.md`](docs/glossary.md), which the test suite checks against
+the implementation.
 
 Try it on real text in the browser: **[deftio.github.io/spab](https://deftio.github.io/spab/pages/)**
 
@@ -144,7 +149,10 @@ directly in a browser.
 
 - `docs/capacity-vs-robustness.md` — choosing what to embed and how robustly.
 - `r_and_d/docs/encoder-decoder-proposal-v1.md` — the full architecture proposal.
-- `r_and_d/docs/symbol-catalog.md`, `spab-watermark-plan.md`, `glossary.md` — design notes.
+- [`docs/glossary.md`](docs/glossary.md) — shared vocabulary: carriers, wire format,
+  transforms, status words. Checked against the implementation by the test suite.
+- `r_and_d/docs/symbol-catalog.md`, `spab-watermark-plan.md`, `glossary.md` — design notes
+  and research vocabulary for schemes not yet built.
 - `r_and_d/docs/prior-art-and-tradeoffs.md` — related tools (StegCloak, 330k, …), approach tradeoffs, and open-source vs. obscurity.
 
 ## Contributing & changes

@@ -1,5 +1,11 @@
 # spab — release / feature TODO
 
+> **Historical record.** This tracks what shipped when, so entries describe the
+> format current *at the time*. Anything here mentioning a magic byte or a one-byte
+> length refers to the 0.1.x-0.4.x frame, retired in 0.5.0. Current behaviour:
+> [`dev/wire-format.md`](../../dev/wire-format.md) and
+> [`docs/glossary.md`](../../docs/glossary.md).
+
 Execution list of things to build toward a useful release. Living checklist; not
 committing to dates. "Not today" items are captured so they aren't lost.
 

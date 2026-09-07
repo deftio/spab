@@ -180,7 +180,8 @@ Runs are seeded (mulberry32), so results are reproducible.
 
 ## What the baseline currently shows
 
-The v0 codec (2 bits/space, repetition + majority vote, CRC+magic frame) is
+The v0 codec (2 bits/space, repetition + majority vote, CRC+magic frame — the 0.1.x
+format, retired in 0.5.0; see `dev/wire-format.md` for what ships now) is
 deliberately simple, and the numbers reflect it:
 
 - **Redundancy is everything.** Only the long corpus fits several copies and survives
@@ -190,7 +191,7 @@ deliberately simple, and the numbers reflect it:
   at low intensity, because the slot stream shifts and repetition can't resync. This is
   the motivation for the sync-aware ECC stacks (markers/A-B framing, fountain, watermark
   codes) in `dev/spab-watermark-plan.md`.
-- **Detection is now honest.** With the magic byte, `reflow`/`fullStrip` and the clean
+- **Detection is now honest.** With the frame checksum, `reflow`/`fullStrip` and the clean
   control read as `not-detected` / 0% false positives — earlier a zero-length payload
   trivially validated.
 
