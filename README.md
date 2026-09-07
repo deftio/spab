@@ -50,7 +50,12 @@ rest of the planned work (compact binary JSON, ChaCha20-Poly1305) is tracked in
 
 A build reports what it can do — `SPAB.version()` or `spab version` gives the library
 version, the wire format it reads, and the carriers, types, compression and encryption
-code points it actually implements (as opposed to the ones the format registers).
+code points it actually implements (as opposed to the ones the format registers). Ask
+the build rather than trusting a document; that is what it is for.
+
+Vocabulary used throughout — carriers, packet fields, transforms, status words — is
+defined in [`docs/glossary.md`](docs/glossary.md), which the test suite checks against
+the implementation.
 
 Try it on real text in the browser: **[deftio.github.io/spab](https://deftio.github.io/spab/pages/)**
 
@@ -81,7 +86,10 @@ pages/          GitHub Pages site — pure HTML/JS/CSS (bitwrench.js), same info
 ## Design invariants
 
 - **Zero third-party dependencies**, in every language.
-- **Deterministic** at runtime (same input + params → same output, on every port).
+- **Deterministic** at runtime: same input and same *explicit* params give the same
+  output on every port. The one exception is encryption, which draws a fresh nonce
+  when `params.nonce` is not supplied — correct AEAD behaviour, and intentionally
+  nondeterministic.
 - **Classic DSP, not gen-AI** — modulation / demodulation / sync / FEC; parameters may be tuned
   offline but nothing learned runs at decode time.
 - **Portable wire format** validated by shared conformance test vectors across all ports.
@@ -141,7 +149,10 @@ directly in a browser.
 
 - `docs/capacity-vs-robustness.md` — choosing what to embed and how robustly.
 - `r_and_d/docs/encoder-decoder-proposal-v1.md` — the full architecture proposal.
-- `r_and_d/docs/symbol-catalog.md`, `spab-watermark-plan.md`, `glossary.md` — design notes.
+- [`docs/glossary.md`](docs/glossary.md) — shared vocabulary: carriers, wire format,
+  transforms, status words. Checked against the implementation by the test suite.
+- `r_and_d/docs/symbol-catalog.md`, `spab-watermark-plan.md`, `glossary.md` — design notes
+  and research vocabulary for schemes not yet built.
 - `r_and_d/docs/prior-art-and-tradeoffs.md` — related tools (StegCloak, 330k, …), approach tradeoffs, and open-source vs. obscurity.
 
 ## Contributing & changes
@@ -150,6 +161,35 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) (invariants, dev setup, branching & mer
 [`RELEASING.md`](RELEASING.md) (release-on-version-bump + branch protection), and
 [`CHANGELOG.md`](CHANGELOG.md) for the release history. spab has **zero runtime and dev
 dependencies**; tooling like bitwrench is fetched on demand via `npx`, never added to the dep list.
+
+## Measuring it
+
+Two different activities, kept apart on purpose:
+
+**`tests/` proves it works.** Binary assertions that must never regress — round-trips
+hold, nothing throws, unmarked text yields nothing, and a damaged mark never returns a
+*different* payload. Percentages are reported there, never asserted. This is what CI
+gates on.
+
+**`r_and_d/` measures how well it works, and where it does not.** Nothing here gates
+anything and every number moves when the codec moves.
+
+```bash
+npm run attacks          # the catalogue: 27 channel models, what each stands in for
+npm run benchmark        # capacity, redundancy, recovery per channel, safety, cost
+npm run capacity         # how big a secret fits in how much text (bytes to megabytes)
+npm run comparisons      # spab against other libraries on the same channel
+```
+
+Reports land in [`r_and_d/reports/`](r_and_d/reports/). The comparison against other
+libraries lives in [`comparisons/`](comparisons/) and is deliberately separate: it
+needs third-party packages, and spab itself has none. Results are rendered at
+[deftio.github.io/spab/pages/#/robustness](https://deftio.github.io/spab/pages/#/robustness).
+
+Two things those tables will tell you that a marketing page would not: spab loses
+outright to whitespace normalisation, reflow and text extraction — those destroy its
+main carrier — and it does not claim resistance to deliberate removal by someone who
+knows the scheme.
 
 ## License
 

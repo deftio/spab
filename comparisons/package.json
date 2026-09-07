@@ -1,0 +1,20 @@
+{
+  "name": "spab-comparisons",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Benchmark spab against other text-watermarking libraries, side by side. Not published; not part of spab's dependency-free surface.",
+  "license": "BSD-2-Clause",
+  "scripts": {
+    "bench": "node run.js",
+    "report": "node run.js --md ../r_and_d/reports/comparisons.md"
+  },
+  "optionalDependencies": {
+    "@fairfox/zws": "^2.0.0",
+    "@pinta365/steganography": "^0.3.2",
+    "@vercel/stega": "^1.1.0",
+    "emoji-smuggle-sdk": "^1.0.2",
+    "stegcloak": "^1.1.1",
+    "zero-width-lib": "^1.1.0",
+    "zwus": "^2.2.2"
+  }
+}

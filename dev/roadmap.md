@@ -71,18 +71,278 @@ whose length field has wrapped.
 
 ## Robustness
 
-### Redundancy sizing beyond auto-grow — **partial**
-`redundancy` currently only shapes how far `autoGrow` inflates a passage. It does
-not apply to substitution-only encoding, where redundancy is whatever capacity
-happens to allow. A caller who wants "three copies or tell me it will not fit"
-cannot ask for that today.
+Ordered by *measured* cost, not by how interesting the fix is. Every figure below
+comes from a run recorded in this file; where something is unmeasured it says so.
 
-### Keyed marks cannot tolerate a change in carrier count — **open**
-The keyed interleave permutation is derived from the digit count, so *any* change to
-the number of carriers — including appending text at the end, which is otherwise
-harmless — descrambles to noise. Resynchronisation is disabled when a key is set for
-this reason. A key-derived permutation over fixed-size blocks rather than the whole
-stream would make keyed marks resynchronisable. Caught by `tests/noise.test.js`.
+### Sliding histogram detector — **core architecture, not yet built**
+
+This is the piece that makes spab robust to editing mayhem, and it belongs in the
+core alongside the fountain layer. The two split the work cleanly: **the sliding
+detector fixes phase, the fountain fixes erasure.**
+
+#### It is a generalisation, not a new subsystem
+
+`r_and_d/docs/encoder-decoder-proposal-v1.md` line 134 states the relationship
+exactly:
+
+> The baseline `0.1.0` is the degenerate case: block = 1 gap, 4-point constellation,
+> hard decision.
+
+The shipping modem *is* the histogram constellation receiver, at **n = 1**. With one
+site there is nothing to integrate, no window to slide and no confidence to emit, so
+"nearest constellation point" collapses to "read the digit". The work is to
+generalise n = 1 to n > 1 with a sliding window and soft output — not to build a new
+modem beside the existing one.
+
+**Naming hazard for whoever picks this up.** The descriptor already says
+`blocks: true` and `symbolLayer: 'mixed-radix (blocked)'`, and those are a *different*
+mechanism: `symBlocks()` groups sites so bits pack across non-power-of-two radices
+under a 2^32 product cap, bounding how far one damaged symbol propagates. It is not
+histogram integration. Two meanings of "block" in one file. The only field that
+honestly reports the gap is `softDecision: false`.
+
+#### What it buys, measured on real spab output
+
+A single block deletion is already survivable — the scan-anywhere packet finds an
+intact copy in the still-aligned prefix, and recovery stays at 100% even with 89
+carrier sites cut out of the middle. **The failure is fragmentation**: every cut adds
+a phase discontinuity, and the decoder can only use whichever single region happens
+to contain a whole packet.
+
+Scattered 5-word cuts, recovery of the payload:
+
+| cuts | sites lost | repetition | rlnc |
+|--:|--:|--:|--:|
+| 0 | 0 | 100% | 90% |
+| 2 | 26 | 100% | 90% |
+| 4 | 49 | 80% | 90% |
+| 8 | 105 | **30%** | 70% |
+| 16 | 178 | **10%** | 50% |
+
+With k cuts the stream is k+1 regions at k+1 different phases. As the regions shrink,
+the chance that any *one* of them holds a complete packet collapses — hence 10%.
+
+Note that **RLNC degrades far more gracefully here (50% vs 10%)**, because a 32-bit
+coded packet fits inside a fragment where a whole frame does not. This is the bursty,
+fragmented channel where the fountain was supposed to earn its keep, and it does.
+It is direct evidence for *Decide RLNC's future* below: the paired benchmark that has
+repetition ahead 88% to 80% is not measuring this case.
+
+#### The architecture to build
+
+Run the sliding detector as an **acquisition layer**, not as the data modem:
+
+```
+carrier sites ─▶ sliding correlator ─▶ per-region phase + confidence
+                                            │
+                                            ▼
+                              existing per-glyph demodulator
+                                            │
+                                            ▼
+                                  packets ─▶ fountain / fold
+```
+
+Acquisition tracks the local phase **per region**, so every fragment is demodulated
+at its own phase and contributes packets — instead of the whole decode hanging on one
+lucky fragment. That is what turns the 10% row above into something much better, and
+it composes with RLNC rather than competing: small packets fit fragments, and pooled
+fragments reconstruct.
+
+Keeping it as acquisition rather than modulation matters for a second reason: **it
+costs no payload capacity.** A histogram-carried payload is inherently low rate; a
+histogram-driven *synchroniser* is not, because the data still rides the per-glyph
+modem at full rate.
+
+#### Where the gain actually comes from — build the right part
+
+Fair comparison, both schemes spending n = 16 sites per 2-bit symbol:
+
+| site corruption | aligned: hard | aligned: histogram | desynced: hard | desynced: sliding |
+|---|--:|--:|--:|--:|
+| 0.0 | 100% | 100% | 89% | **100%** |
+| 0.4 | 100% | 100% | 79% | **99%** |
+| 0.6 | 95% | 95% | 68% | **89%** |
+
+**Aligned, the two are identical** — with a one-hot constellation, maximum likelihood
+over a block *is* majority voting. The entire win is the sliding window. So build the
+window search and the soft output; do not over-invest in constellation geometry.
+Shaping earns nothing against uniform randomisation, and nothing against a collapse
+channel either, since NFKC folds every variant onto U+0020 and destroys all
+constellation points equally.
+
+Then feed confidences forward: a site read as 0.51/0.49 and one read as 0.999/0.001
+currently become the same hard bit, and the fountain decoder never learns the
+difference.
+
+*Two negative results, recorded so they are not rebuilt:*
+
+**Reliability-weighted voting does not work.** Per-site confidence from the soft
+layer was used to down-weight blocks holding more ambiguous default glyphs in the
+majority vote. It never helped and twice hurt — scattered folding at 5% went 56% ->
+50%, at 20% went 6% -> 0%. The weight cannot distinguish a DAMAGED default glyph
+from a legitimately sent one, since about 1/radix of sites carry the default value
+in an intact stream, so it penalises good blocks for their content. The information
+is not there at the site level. It may be there at the *window* level, which is what
+the sliding detector is for.
+
+**Composition (multiset) coding**,
+where the histogram itself is the codeword, is a different scheme and a bad one. A
+block of n sites over r variants has `C(n+r-1, r-1)` distinct histograms, so capacity
+grows only logarithmically in n — 32 bits positional versus 9.9 at n=16, r=4, and 24x
+worse by n=256. Robustness to a lost symbol *is* low information per symbol; they are
+the same property. The sliding detector above is not this: the payload keeps riding
+the per-glyph modem, and the histogram is used to find the phase.
+
+### Keyed marks cannot tolerate a change in carrier count — **done** (0.5.1)
+
+The keyed permutation was built by Fisher-Yates over all `n` digits, so any change to
+the carrier count invalidated it globally and resynchronisation had to be switched
+off for keyed marks. Measured cost was **97% -> 27%** under structural damage, with
+an exact correlation: every model that preserved the carrier count recovered, every
+model that changed it scored zero.
+
+Fixed by deriving the permutation over fixed-size blocks of `KEY_BLOCK = 32` digits
+from `(key, id)` alone, never from `n`, and making the whitening PN block-local for
+the same reason — keying it to absolute index left excerpting broken, because
+dropping 125 sites off the front is a shift no 32-phase sweep can undo. The
+`key ? 1` special case in `phaseCount()` is gone, so keyed marks sweep phases like
+any other.
+
+| damage model | sites | before | after |
+|---|---|--:|--:|
+| append a sentence | +7 | 0% | **100%** |
+| prepend a sentence | +4 | 0% | **100%** |
+| delete a word | -1 | 33% | **100%** |
+| delete two words | -2 | 0% | **100%** |
+| delete a sentence | unchanged | 80% | **100%** |
+| excerpt first half | -188 | 0% | **87%** |
+| excerpt last two thirds | -125 | 0% | **93%** |
+
+Overall keyed structural recovery **27% -> 98%**, level with unkeyed's 97%. The cost
+is a permutation repeating every 32 digits, which is weaker than a global one; `key`
+is documented as a cost multiplier rather than confidentiality and `encKey`
+(AES-256-GCM) is the real confidentiality mechanism, so this is the right trade.
+
+### Mixed carriers for large payloads — **open**
+
+Auto-grow today is the crude version of the right idea: when a payload will not fit,
+raise zero-width density until it does. That pushes one carrier to its limit and
+inherits that carrier's single failure mode — a sanitiser that strips invisible
+characters takes the whole mark.
+
+The designed version splits the payload across carriers by what each is good at:
+**dense zero-width insertion for bulk**, where capacity is set by density rather than
+by the text, and **length-preserving substitution for the part that must survive**,
+where capacity is scarce but the mark survives an invisible-character scrub. A
+fountain code across both means the substitution carriers alone can reconstruct a
+short payload — an identifier, say — even when every zero-width character is gone,
+while the bulk rides the dense channel when the channel is intact.
+
+Measured motivation, from `npm run capacity`: substitution tops out near 40 bytes per
+kilobyte of prose at one copy and is a property of English, not of the codec. Auto-grow
+clears that by orders of magnitude but abandons length preservation, which is the
+property most callers came for. Neither operating point is right for a large payload
+that also has to survive; the mix is.
+
+Depends on the sliding histogram detector for the soft output that would let a
+fountain decoder weigh the two channels differently.
+
+### Block size is a robustness knob nobody is turning — **open**
+
+Mixed-radix conversion mixes every site in a block into every bit of that block, so
+one folded carrier corrupts up to 32 bits. That makes PARTIAL normalization — a tool
+that flattens some whitespace variants but not all — far more destructive than its
+rate suggests. `params.block` already caps block size in sites, and it matters:
+
+| variants folded | default | block=2 | block=3 | block=4 | block=6 |
+|--:|--:|--:|--:|--:|--:|
+| 5% | 60% | 70% | 60% | **80%** | **80%** |
+| 10% | 20% | 40% | 40% | **60%** | 30% |
+| 15% | 0% | **50%** | 40% | 20% | 10% |
+| 20% | 0% | 0% | **20%** | 10% | **20%** |
+
+Ten trials per cell, so the cells are noisy, but the trend is not: the default (up to
+32 sites per block) is the worst column at every damage level above zero. The default
+is tuned for capacity, and capacity is not what is scarce in a long document. Worth a
+proper sweep and probably a smaller default, or an adaptive one chosen from the
+cover's size.
+
+### RLNC packet geometry — **done** (0.5.1)
+
+The coded packet was `[esi:16][data:8][crc8]` — 32 bits to carry one byte, so three
+quarters of it overhead, with 16 bits of index for a value that never exceeded a few
+hundred.
+
+Now four named geometries via `params.rlncGeom`, defaulting to **`8/16/8`**: the same
+32-bit width, the same block alignment, the same check, and **twice the payload**.
+
+| geometry | width | payload | desync | other damage | paired overall |
+|---|--:|--:|--:|--:|--:|
+| `v1` (16/8/8) | 32b | 25% | 20% | 46% | 48% |
+| **`default` (8/16/8)** | **32b** | **50%** | 15% | **63%** | **56%** |
+| `wide` (16/32/16) | 64b | 50% | 3% | 50% | 53% |
+| `widest` | 156b | 82% | 0% | 44% | 43% |
+
+Repetition scores 60% on the same paired set, so most of the gap is closed.
+
+**Packet width is coupled to the modem, and this is the load-bearing finding.** The
+mixed-radix layer groups sites into 32-bit blocks and the resync sweep re-cuts that
+grid one site at a time, so a packet wider than a block cannot be realigned after an
+insertion or deletion. Desync recovery: 32-bit 20%, 40-bit 1%, 64-bit 3%, 96-bit 0%.
+Every wider geometry proposed during this work — 12/32/12, 12/32/16, 16/32/16 — bought
+efficiency with the one failure mode redundancy cannot fix. The win had to come from
+re-splitting 32 bits, not from more of them.
+
+**Esi wrapping.** Capacity beyond the distinct-equation space now emits duplicate
+packets rather than stopping. `rlncCoeffs(esi, K)` is pure, so a wrapped packet is an
+identical copy, not a conflicting equation, and the decoder keeps the first valid one.
+On a 200K-character cover this takes heavy-damage recovery from 60% to 80%. An earlier
+version of this work capped emission instead, on the mistaken belief that wrapping
+produced colliding equations.
+
+Still open here:
+
+* **The geometry is not signalled on the wire.** Encoder and decoder must be given the
+  same `rlncGeom`, like `ecc` and `classes`. It should move into the packet header.
+* **Source blocking** would let the esi stay narrow indefinitely. With wrapping it is
+  an optimisation rather than a correctness requirement.
+
+### Inner code for coded packets — **open, this is the one that matters**
+
+RLNC still trails repetition, 56% against 60%, and geometry is not why. **A damaged
+packet is discarded whole**, where repetition's per-bit majority salvages a partially
+damaged one. All-or-nothing loses to majority rule on a substitution channel:
+
+```
+P(packet survives) = (1 - p)^width
+  p=0.5%   32-bit packet  85%
+  p=2%     32-bit packet  52%
+```
+
+A short inner code per packet — Hamming, or a shortened BCH — would let a packet with
+a bit error be *repaired* rather than thrown away. That is the precondition for
+everything else: with it, wider packets become affordable and the geometry trade
+reverses; without it, they are a measured net loss.
+
+*Two negative results from 0.5.1, recorded so they are not rebuilt:*
+
+**A repeat schedule does not help.** If repetition fits four copies, a fountain
+emitting several copies of each equation ought to beat it. It does not: repeating
+means the decoder needs EVERY equation in the set to survive at least once, where
+all-distinct means it needs ANY K. Measured 56% against 57%. Note this is *not* an
+argument against wrapping, which only repeats after the distinct space is exhausted.
+
+**Bit-level voting across copies adds nothing.** Implemented and measured: it produced
+zero wrong packets, and had nothing to contribute, because a packet that passes its
+own checksum is already better evidence than a vote over copies.
+
+### Packet admission hardening — **measured as a non-issue, do not spend on it yet**
+
+A reasonable concern is that the packet CRC8 lets chance-valid packets into the RLNC
+solve. Measured across nine unmarked passages swept at every phase and offset:
+**zero** chance packets admitted, zero false payloads. The lazy phase pooling (phase 0
+first, widen only on failure) already keeps them out. Revisit if a measurement shows
+otherwise; until then a wider packet checksum is overhead without payment.
 
 ### NFKC survival needs more confusable capacity — **open**
 "How it works" says the payload survives normalization via the apostrophe and hyphen
@@ -139,9 +399,12 @@ should shape the next round of design:
 - **Re-verify the capability matrix** in `r_and_d/docs/prior-art-and-tradeoffs.md`
   against current releases; the entries come from project documentation and have not
   been re-checked.
-- **Decide RLNC's future.** Repetition beats it paired (88% vs 80%). RLNC should win
-  where damage is bursty and channels differ in survival; if a targeted test cannot
-  show that, it is complexity without payment.
+- **Decide RLNC's future.** Repetition beats it paired (88% vs 80%) — but see
+  *RLNC symbol geometry* above: scalar packets spend 32 bits per source byte, so the
+  comparison is being run where RLNC cannot afford to compete. Fix the geometry
+  first, then re-run. RLNC should win where damage is bursty and channels differ in
+  survival; if a targeted test still cannot show that, it is complexity without
+  payment.
 - **Position-independent framing.** Point insertion beats spreading on desync purely
   because a contiguous payload with a scan-anywhere decoder does not care about
   position. Sync markers or content-addressed packets would aim to have both.

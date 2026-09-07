@@ -5,6 +5,237 @@ versions follow [SemVer](https://semver.org/). The JavaScript reference implemen
 (`src/js/spab.js`) is published on npm as [`@deftio/spab`](https://www.npmjs.com/package/@deftio/spab);
 the wire format is still settling, so minor versions may change it.
 
+## [0.5.1] — 2026-09-06
+
+Robustness release, on top of the v2 wire format shipped in 0.5.0.
+
+### Fixed
+
+- **Keyed marks now survive editing.** The keyed interleave built one Fisher-Yates
+  permutation over all `n` digits, so any change to the carrier count invalidated it
+  globally — and resynchronisation was switched off for keyed marks as a result.
+  Measured cost: **97% -> 27%** recovery under structural damage, with an exact
+  correlation — every damage model that preserved the carrier count recovered, every
+  model that changed it scored **zero**. Appending one sentence destroyed a keyed
+  mark completely.
+
+  The permutation is now over fixed-size 32-digit blocks derived from `(key, id)`
+  alone, never from `n`, and the whitening PN is block-local for the same reason
+  (keying it to absolute index left excerpting broken — dropping 125 sites off the
+  front is a shift no 32-phase sweep can undo). Keyed structural recovery is
+  **27% -> 98%**, level with unkeyed. **This changes how keyed marks are written:**
+  a keyed mark from 0.5.0 does not decode here.
+- **A channel returning `unsupported` could mask a channel that recovered the payload.**
+  `decode()` compares channels with a rank table, and 0.5.0 added `unsupported`,
+  `encrypted`, `auth-failed` and `corrupt` without ranking them. An unranked status
+  compares as `undefined`, every comparison against it is false, and the first channel
+  examined wins by default — so a `ws` channel returning a located, checksum-valid
+  packet it could not open silently blocked the `zwsp` channel's `perfect` result.
+  Encode reported five copies and no issues; decode returned `null`.
+
+  Found by the new capacity sweep at a 100 KB cover with a 4 KB payload, which is why
+  it survived the whole test suite: it needs a cover large enough for auto-grow to
+  engage while the substitution channels hold a truncated copy. Ranking now covers
+  every status, a recovered payload outranks everything that is not one, and
+  `tests/branches.test.js` asserts that every status the codec emits is ranked —
+  scanning the source for both `status:` and `fail:` literals, because a reproduction
+  at that size is too slow for the suite.
+- **The histogram detector's only test was vacuous.** `histogram()` had exactly one
+  assertion — `total === sum(counts)` — which is self-consistent by construction and
+  would pass if the function counted nothing, counted the wrong characters, or put
+  every variant in the wrong bucket. Mutation-tested against three plausible
+  breakages: the old assertion caught **one of three**, the eight new ones catch all
+  three. They pin exact bucket assignment against `SPACE_MAP` order, the unmarked
+  null case, that a marked passage actually registers, and agreement with
+  `getSlots()`. The function was correct; nothing was checking that it stayed so.
+- **Emoji joiners are no longer read as payload.** U+200D is both a `zwsp` carrier
+  variant and the emoji ZERO WIDTH JOINER, so a family emoji's own joiners came back
+  as carrier digits — two spurious digits extracted from an *unmarked* cover, which
+  shifts every real digit after them. A joiner between two pictographic characters is
+  now skipped. Found by the new corpus on its first run.
+
+### Changed
+
+- **The RLNC fountain packet is re-split: `8/16/8` replaces `16/8/8`.** The coded
+  packet spent 16 bits on an index that never exceeds a few hundred and 8 on its
+  check, leaving 8 for payload — three quarters overhead. The new default keeps the
+  same 32-bit width, block alignment and check strength, and **doubles the payload**.
+  Selectable via `params.rlncGeom` (`'v1' | 'default' | 'wide' | 'widest'`); encode
+  and decode must agree, as they must for `ecc` and `classes`.
+
+  | geometry | width | payload | desync | other damage | paired overall |
+  |---|--:|--:|--:|--:|--:|
+  | `v1` (16/8/8) | 32b | 25% | 20% | 46% | 48% |
+  | **`default` (8/16/8)** | **32b** | **50%** | 15% | **63%** | **56%** |
+  | `wide` (16/32/16) | 64b | 50% | 3% | 50% | 53% |
+  | `widest` | 156b | 82% | 0% | 44% | 43% |
+
+  Repetition scores 60% on the same paired set, so most of the gap closes. **Marks
+  written with `ecc: 'rlnc'` by 0.5.0 do not decode here** unless `rlncGeom: 'v1'` is
+  passed to both sides.
+
+  The finding underneath: **packet width is coupled to the modem.** The mixed-radix
+  layer groups carrier sites into 32-bit blocks and the resync sweep re-cuts that grid
+  one site at a time, so a packet wider than a block cannot be realigned after an
+  insertion or deletion — desync recovery falls from 20% at 32 bits to 1% at 40 and
+  0% at 96. Several wider geometries were built and measured before this was
+  understood; all of them bought efficiency with the one failure mode redundancy
+  cannot fix.
+- **Fountain packets now wrap past the end of the ESI space** rather than stopping.
+  `rlncCoeffs(esi, K)` is a pure function, so a wrapped packet is an identical
+  duplicate, not a second equation claiming the same id, and the decoder keeps the
+  first valid copy. Capacity beyond the distinct-equation space therefore buys
+  redundancy: on a 200,000-character cover this takes recovery under heavy scattered
+  damage from 60% to 80%. An earlier revision capped emission instead, on the mistaken
+  belief that wrapping produced colliding equations.
+
+### Added
+
+- **The ECC layer is now specified** in `dev/wire-format.md` §9b. The document
+  described the packet and called itself a post-ECC format, but never said what is
+  actually written into the carrier stream — the repetition layout, the fountain
+  packet fields, the GF(2⁸) polynomial, the coefficient PRNG, the checksum seed, the
+  `esiBase` rule and the wrapping behaviour. A port cannot be bit-compatible without
+  them, so their absence was a gap rather than a scoping decision.
+- **A research measurement surface**, kept firmly apart from CI. `tests/` proves the
+  implementation works with binary assertions that must never regress; `r_and_d/`
+  measures how well it works, gates nothing, and every number there moves when the
+  codec moves. Neither is fast and neither is meant to be — they run periodically, and
+  a benchmark that samples its own matrix reports a figure nobody can reproduce.
+  - **`npm run attacks`** — a documented catalogue of all 27 channel models: what each
+    does, the real situation it stands in for, and which carriers it damages. A model
+    with no entry **fails the benchmark** rather than appearing as an unlabelled row.
+  - **`npm run benchmark`** — capacity, redundancy achieved, recovery per channel
+    **split by redundancy band**, the degradation curve, the safety invariants and
+    encode/decode cost. Redundancy is a separate axis because the same model reads 0%
+    on a passage that fits one copy and 100% on one that fits eight; averaging those
+    describes neither.
+  - **`npm run capacity`** — how big a secret fits in how much text, from 50 characters
+    to a megabyte of cover against payloads from 4 bytes to a megabyte, in both
+    length-preserving and auto-grow modes. Headline: substitution carriers top out near
+    **40 bytes per kilobyte of prose at one copy**, and that is a property of English
+    rather than of the codec.
+  - **`npm run comparisons`** — spab against other published libraries on the same
+    corpus and the same damage. Lives in `comparisons/` with its own `package.json`,
+    because it needs third-party packages and spab has none. A library that is not
+    installed is a **skipped row, never a zero**.
+- **A `/robustness` page** rendering those results, generated from the runner rather
+  than typed. Rows sort alphabetically by model, spab's losses use the same colour
+  scale as its wins, and the page states plainly that spab publishes it, that it
+  measures modelled channels rather than Word or Gmail, and that a good score on an
+  `attack` row is not a security claim.
+- **`SPAB.detect(text, params)` — the sliding histogram detector.** Reports, per
+  carrier class, a *likelihood field*: a window slid over the carrier sites with the
+  histogram and a marked-ness score at each position, plus per-site posteriors and a
+  channel estimate. Output is a field over position, not a symbol stream.
+  - **Channel estimation with no pilots.** The carrier histogram *is* the pilot: an
+    intact marked stream is near-uniform over the radix, so excess mass on the
+    default glyph measures how much normalization collapse the text has been
+    through. Unmarked prose estimates 0.99, a marked passage 0.41, and the same
+    passage after NFKC returns to 0.99.
+  - **The soft model is asymmetric, because the channel is.** Nothing turns a plain
+    space into a thin space, so observing a variant is near-certain while observing
+    the default glyph is ambiguous in proportion to the estimated collapse.
+  - Doubles as the steganalysis statistic an adversary would run, which is the point
+    of exposing it rather than hiding it.
+- **`tests/corpus.js` — 73 structurally diverse documents** (8 short public-domain
+  excerpts, 65 written for the suite), chosen so each stresses a different carrier
+  property: scripts with no inter-word spaces (Chinese, Japanese, Thai), right-to-left
+  text, emoji ZWJ and tag sequences, combining marks, code and markup in seven
+  languages, covers that already contain unicode spaces and curly quotes, and lengths
+  from empty to twelve paragraphs.
+- **`tests/corpus.test.js`** runs the whole codec across that corpus — 73 documents x
+  11 parameter sets x 6 payload shapes — asserting behaviour rather than percentages:
+  4,818 encode/decode/detect calls without a throw, every failure to round-trip
+  carrying a capacity warning, no payload ever reported from unmarked text, carrier
+  length and visible-text invariants on every document, and **2,352 damage trials
+  with zero wrong payloads**.
+- **Fuzz and 100% coverage are now CI gates**, not report-only. The wire format is
+  being frozen for language ports, and a port is written against what the reference
+  implementation actually does; a regression that lands silently becomes a
+  conformance vector that enshrines it.
+
+  The gate found something on its first run: **coverage differs by Node version.**
+  The same commit reported 758/758 branches on Node 22 and 757/758 on 18 and 20, the
+  missing block being the browser arm of the UMD footer. That arm *is* exercised —
+  `branches.test.js` sets `global.window`, re-requires the module and asserts
+  `window.SPAB`, and that assertion passes everywhere — but V8's **block attribution
+  for a re-required script** credits it on 22 and not on 18/20. Node 18 also reports
+  one more ignorable block than 20 and 22. The block is annotated with the reason and
+  the behavioural assertion stays; gating on it would make the coverage number a
+  function of the runtime rather than of the tests. Worth knowing before the ports
+  land, since cross-version consistency is exactly what they will rely on.
+
+### Documentation
+
+- **The source header described the 0.1.x codec** — "magic 0xA5", a one-byte length,
+  whitespace-only defaults — none of which had been true for two wire formats. A
+  porting agent reading it would have faithfully implemented the wrong thing. It now
+  describes v2, and `tests/wire.test.js` **asserts the header against the descriptor**
+  so it cannot drift again.
+- **"any K packets" corrected to "any K linearly independent packets"** in the RLNC
+  comments and the algorithm descriptor. Systematic ESIs are independent by
+  construction; random repair rows are independent with overwhelming probability but
+  not by guarantee, and the solver already detects an under-rank system.
+- **The determinism claim now states its exception**: identical output for identical
+  *explicit* params, except that encryption draws a fresh nonce when `params.nonce`
+  is absent.
+- **`docs/glossary.md` — the shared vocabulary, rewritten and now tested.** Carriers,
+  the packet layout, transforms, ECC, the soft layer and every status word, with
+  diagrams where a definition alone does not carry it. The old glossary had rotted
+  badly: it documented a `[magic][len][content][crc]` frame two formats after that
+  frame was retired, called the type field "2–3 bits" when it is 5, named
+  Reed–Solomon as the baseline code when the codec has never used one, and listed a
+  `tampered` status that never existed. `tests/wire.test.js` now asserts the glossary
+  against the implementation — every ranked status documented, no status invented,
+  every payload type and carrier class present, the field widths and checksum
+  exponents correct, and the retired magic constant absent. A glossary nobody tests
+  is a glossary that lies eventually.
+- **`r_and_d/docs/glossary.md` is now scoped to research vocabulary** — terms for
+  schemes proposed, exploratory or deliberately not built — with a pointer to the
+  shipping one. Splitting them is what stops the shipping half rotting again.
+- **README version drift is a test.** The `version()` example in `src/js/README.md`,
+  `package.json` and `SPAB.VERSION` must agree, and the README must document every
+  status the decoder can return.
+- **Two architecture reviews added under `dev/`** — `spab_0.5_review.md` (spab in the
+  text-watermarking landscape, with a gap analysis) and
+  `spab_0.5.0_world_architecture_recommendations.md` (what a sliding-histogram
+  receiver changes and what to build on top of it). Most of this release's work comes
+  from their P0 items; `dev/roadmap.md` records which of their claims survived
+  measurement and which did not.
+- **`r_and_d/docs/prior-art-and-tradeoffs.md` was stale** — it still listed typed
+  payloads and encryption as spab's two gaps, both closed in 0.5.0. Corrected and
+  version-stamped, since an unstamped capability table goes stale silently.
+
+### Measured and rejected
+
+Recorded because a negative result that is not written down gets rebuilt:
+
+- **A fountain repeat schedule.** If repetition fits four copies of the payload, a
+  fountain emitting several copies of each equation ought to beat it. It does not:
+  repeating means the decoder needs EVERY equation in the set to survive at least
+  once, where all-distinct means it needs ANY K of them — a strictly weaker condition.
+  Measured 56% against 57%. (This is not an argument against esi wrapping above, which
+  only repeats once the distinct space is genuinely exhausted.)
+- **Bit-level voting across packet copies.** Implemented alongside the schedule, and
+  it was not the problem: it produced zero wrong packets. It simply had nothing to
+  add, because a packet that passes its own checksum is already better evidence than a
+  majority vote over copies.
+- **Wider fountain packets** (12/32/12, 12/32/16, 16/32/16, and larger). All improve
+  efficiency and all lose desync recovery, because packet width is coupled to the
+  32-bit modem block. Kept as selectable geometries so the measurement is reproducible
+  and so the trade can be revisited once packets tolerate bit errors.
+
+- **Reliability-weighted voting.** Per-site confidence was used to down-weight blocks
+  holding more ambiguous glyphs in the majority vote. It never helped and twice hurt
+  (5% scattered folding 56% -> 50%; 20% folding 6% -> 0%). The weight cannot tell a
+  damaged default glyph from a legitimately sent one, so it penalises good blocks for
+  their content. Removed; the soft layer stays exposed for uses where the information
+  is actually present.
+- **Wider packet checksums for RLNC admission.** Zero chance-valid packets were
+  admitted across nine unmarked passages swept at every phase and offset, so this is
+  overhead without payment today.
+
 ## [0.5.0] — 2026-09-05
 
 ### Changed — wire format v2 (breaking)
@@ -84,6 +315,44 @@ exists to make the break explicit rather than a guess.
   every header field: wire version, type, compression, encryption, checksum width, stored and
   opened sizes.
 
+- **11 real-world corruption models** in `r_and_d/corruptions.js`: pasting into a plain text field,
+  PDF/rendered-page extraction, tokenise-and-rejoin, email quoting, editor trailing-space trim,
+  per-word typos, terminology find-and-replace, JSON round trip (a control that must always
+  survive), sentence reordering, markdown stripping, and concatenation into a larger document.
+  These are what a mark actually meets; the existing models are synthetic damage.
+- **`r_and_d/samples.js`** — ten fixed text samples chosen so each stresses something different:
+  punctuation-rich and punctuation-poor prose, chat-style short lines, markdown, code with
+  structural indentation, a long passage, a passage too small to encode, text with no inter-word
+  spaces at all (CJK-like), and text that already contains unicode spaces and curly quotes.
+- **`npm run characterize`** — a deterministic sweep (10 samples x 7 payload sizes x 4 carrier sets
+  x 2 ECC modes x 23 models, ~3,465 rows) reporting recovery grouped the way design has to reason
+  about it. It reports **paired** comparisons alongside the raw ones, because the raw tables are
+  confounded: an arm with more capacity encodes in a different population than one without. On this
+  data the paired view reverses the ECC conclusion — raw says RLNC 80% vs repetition 70%, paired
+  over the 900 cells both could encode says repetition 88% vs RLNC 80%.
+- **The deterministic suite now covers the real-world channels** as a classification rather than a
+  pass mark: lossless channels must keep the mark, destructive ones may lose it but must never
+  return a wrong payload.
+- **`npm run compare` — spab against reference models of the other approaches.** `r_and_d/baselines.js`
+  reimplements each *technique* (point insertion as StegCloak shapes it, spread insertion as 330k
+  does, naive whitespace substitution as the snow family does) so the comparison isolates two design
+  decisions — where the payload sits and whether there is error correction — rather than benchmarking
+  anyone's library. Paired, like the characterization sweep.
+- **`r_and_d/reports/findings.md`** — a running log of what the harnesses actually show, with the
+  command to reproduce each number and superseded findings struck rather than deleted.
+- **A capability matrix in `r_and_d/docs/prior-art-and-tradeoffs.md`** across placement, ECC/erasure,
+  integrity, compactness, typed payloads and encryption, marked clearly as sourced from project
+  documentation rather than measured. It puts spab's two gaps in writing: no type field and no real
+  encryption, both of which StegCloak has had for years.
+- **Two measurement biases found and fixed.** The corruption suite only ever attacked the whitespace
+  channel, so zero-width schemes sailed through a suite that never touched them (`stripZw`, `zwNoise`
+  added); and `truncate` kept the head, which silently favours any scheme anchored at the start
+  (`truncTail`, `midExcerpt` added — point insertion's excerpt score fell from 83% to 36% once the
+  mirror cases existed). A robustness suite written around one design will flatter that design.
+- **Findings recorded in `dev/roadmap.md`** — redundancy (not length) is the variable that moves
+  recovery; the confusable channels never fit a payload alone in the whole sweep; excerpting and
+  word deletion remain the weakest survivable cases.
+
 ### Documentation
 
 - **`tests/README.md` listed only `roundtrip.test.js`** — it predated `branches`, `wire`, `noise`,
@@ -138,46 +407,6 @@ exists to make the break explicit rather than a guess.
 - **The RLNC/NFKC round-trip test was on a capacity knife edge** (240 surviving bits against the 256
   an 8-byte packet needs), so a one-byte growth in the packet broke it. Given the cover it needs.
 
-### Added
-- **11 real-world corruption models** in `r_and_d/corruptions.js`: pasting into a plain text field,
-  PDF/rendered-page extraction, tokenise-and-rejoin, email quoting, editor trailing-space trim,
-  per-word typos, terminology find-and-replace, JSON round trip (a control that must always
-  survive), sentence reordering, markdown stripping, and concatenation into a larger document.
-  These are what a mark actually meets; the existing models are synthetic damage.
-- **`r_and_d/samples.js`** — ten fixed text samples chosen so each stresses something different:
-  punctuation-rich and punctuation-poor prose, chat-style short lines, markdown, code with
-  structural indentation, a long passage, a passage too small to encode, text with no inter-word
-  spaces at all (CJK-like), and text that already contains unicode spaces and curly quotes.
-- **`npm run characterize`** — a deterministic sweep (10 samples x 7 payload sizes x 4 carrier sets
-  x 2 ECC modes x 23 models, ~3,465 rows) reporting recovery grouped the way design has to reason
-  about it. It reports **paired** comparisons alongside the raw ones, because the raw tables are
-  confounded: an arm with more capacity encodes in a different population than one without. On this
-  data the paired view reverses the ECC conclusion — raw says RLNC 80% vs repetition 70%, paired
-  over the 900 cells both could encode says repetition 88% vs RLNC 80%.
-- **The deterministic suite now covers the real-world channels** as a classification rather than a
-  pass mark: lossless channels must keep the mark, destructive ones may lose it but must never
-  return a wrong payload.
-- **`npm run compare` — spab against reference models of the other approaches.** `r_and_d/baselines.js`
-  reimplements each *technique* (point insertion as StegCloak shapes it, spread insertion as 330k
-  does, naive whitespace substitution as the snow family does) so the comparison isolates two design
-  decisions — where the payload sits and whether there is error correction — rather than benchmarking
-  anyone's library. Paired, like the characterization sweep.
-- **`r_and_d/reports/findings.md`** — a running log of what the harnesses actually show, with the
-  command to reproduce each number and superseded findings struck rather than deleted.
-- **A capability matrix in `r_and_d/docs/prior-art-and-tradeoffs.md`** across placement, ECC/erasure,
-  integrity, compactness, typed payloads and encryption, marked clearly as sourced from project
-  documentation rather than measured. It puts spab's two gaps in writing: no type field and no real
-  encryption, both of which StegCloak has had for years.
-- **Two measurement biases found and fixed.** The corruption suite only ever attacked the whitespace
-  channel, so zero-width schemes sailed through a suite that never touched them (`stripZw`, `zwNoise`
-  added); and `truncate` kept the head, which silently favours any scheme anchored at the start
-  (`truncTail`, `midExcerpt` added — point insertion's excerpt score fell from 83% to 36% once the
-  mirror cases existed). A robustness suite written around one design will flatter that design.
-- **Findings recorded in `dev/roadmap.md`** — redundancy (not length) is the variable that moves
-  recovery; the confusable channels never fit a payload alone in the whole sweep; excerpting and
-  word deletion remain the weakest survivable cases.
-
-### Fixed
 - **`publish.yml` never ran.** It triggered on `release: published`, but `release-on-bump.yml`
   creates the Release with the default `GITHUB_TOKEN`, and GitHub does not fire workflows from
   events raised by that token — so no release from v0.4.0 to v0.4.2 ever reached npm automatically.

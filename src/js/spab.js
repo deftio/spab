@@ -1,22 +1,45 @@
 /*
  * spab.js — text watermark codec (reference implementation)
  *
- * Pluggable symbol library over a mixed-bit slot stream:
- *   - Carrier CLASSES, each contributing "sites" in the text that carry bits:
- *       ws     — inter-word space, 4 whitespace variants (2 bits/site)   [default]
- *       apos   — apostrophe/right-single-quote  U+0027 <-> U+2019 (1 bit) [opt-in]
- *       hyphen — hyphen-minus/Unicode hyphen     U+002D <-> U+2010 (1 bit) [opt-in]
- *     ('punct' is shorthand for apos+hyphen.)
- *   - All enabled classes' sites are merged in text order into one bit stream.
- *   - Framing: [magic 0xA5][len][content...][crc8].
- *   - ECC: repetition + majority vote across the whole stream.
+ * Hides a payload in choices a reader never notices: which of several visually
+ * equivalent whitespace characters sits between two words, whether an apostrophe is
+ * straight or curly, whether a hyphen is U+002D or U+2010.
  *
- * Default params ({}) = whitespace-only, identical to the 0.1.x baseline. Enable
- * confusables with params.classes:['ws','punct'] (or profile:'ws+punct'). The
- * confusable classes survive whitespace-only attacks (normalize/reflow/regex),
- * giving a second, strip-resistant channel. encode/decode must use the same classes.
+ * Carrier classes, each contributing "sites" that carry symbols:
+ *     ws      — inter-word space, 4 whitespace variants   (2 bits/site)  [default]
+ *     apos    — U+0027 <-> U+2019                         (1 bit/site)   [default]
+ *     hyphen  — U+002D <-> U+2010                         (1 bit/site)   [default]
+ *     wsdense — 8 whitespace variants                     (3 bits/site)  [opt-in]
+ *     zwsp    — INSERTS zero-width characters             (2 bits/char)  [opt-in]
+ *   ('punct' is shorthand for apos+hyphen.)
+ *
+ * Classes are INDEPENDENT PARALLEL CHANNELS, each carrying the whole payload, so an
+ * edit that destroys one can leave another intact. Default = ws + apos + hyphen,
+ * chosen because they fail differently: whitespace dies to NFKC normalization, the
+ * confusables survive it.
+ *
+ * Payload path:
+ *   message -> type -> compress? -> encrypt? -> packet -> ECC -> symbols -> text
+ *
+ * Wire format v2 (normative spec in dev/wire-format.md):
+ *   [version:3 | type:5 | comp:3 | enc:3 | cksum:3]  17-bit fixed header
+ *   [extension bytes, grouped, in field order]       only for escaped fields
+ *   [len varint]                                     only when not implied by type
+ *   [checksum, 8 << cksum bits]                      BEFORE the content, deliberately
+ *   [content][pad to a byte boundary]
+ * There is no magic number: the header's own plausibility plus the checksum is the
+ * discriminator. Packets written by 0.4.x are NOT read by this version.
+ *
+ * ECC: per-channel repetition + per-bit majority vote (default), or a GF(256)
+ * systematic RLNC fountain (ecc:'rlnc') whose self-checking 32-bit packets pool
+ * across channels.
+ *
+ * Determinism: same input and same explicit params give the same output on every
+ * port — EXCEPT that encryption draws a fresh 12-byte nonce when `params.nonce` is
+ * not supplied, which is correct AEAD behaviour and intentionally nondeterministic.
  *
  * Works as a browser global (window.SPAB) and via CommonJS (module.exports).
+ * Zero dependencies, including for SHA-256, AES-256-GCM and compression.
  */
 (function (root) {
   'use strict';
@@ -27,6 +50,28 @@
   var WS_SET = {};
   SPACE_MAP.forEach(function (c, i) { WS_SET[c] = i; });
 
+  // Is the code point at `at` pictographic — emoji, symbol, regional indicator, or a
+  // variation selector/tag that belongs to one? Used only to tell an emoji joiner
+  // apart from a zero-width carrier. Works on UTF-16 code units, so a low surrogate
+  // is checked by pairing it with the high surrogate before it.
+  function isPictographic(text, at) {
+    if (at < 0 || at >= text.length) return false;
+    var c = text.charCodeAt(at);
+    if (c >= 0xDC00 && c <= 0xDFFF && at > 0) {          // low surrogate: rebuild the pair
+      var hi = text.charCodeAt(at - 1);
+      if (hi >= 0xD800 && hi <= 0xDBFF) c = (hi - 0xD800) * 0x400 + (c - 0xDC00) + 0x10000;
+    } else if (c >= 0xD800 && c <= 0xDBFF && at + 1 < text.length) {
+      var lo = text.charCodeAt(at + 1);
+      if (lo >= 0xDC00 && lo <= 0xDFFF) c = (c - 0xD800) * 0x400 + (lo - 0xDC00) + 0x10000;
+    }
+    if (c === 0xFE0F || c === 0xFE0E) return true;        // variation selectors
+    // Regional indicators (U+1F1E6..U+1F1FF) need no line of their own: they sit
+    // inside the emoji block range below.
+    if (c >= 0x1F000 && c <= 0x1FAFF) return true;        // emoji blocks
+    if (c >= 0x2600 && c <= 0x27BF) return true;          // misc symbols and dingbats
+    if (c >= 0xE0020 && c <= 0xE007F) return true;        // tag characters (flag sequences)
+    return false;
+  }
   function isWordChar(ch) { return !!ch && !/\s/.test(ch) && !(ch in WS_SET) && !(ch in ZW_SET); }
   // Neighbours, skipping zero-width characters. They are invisible, so they must
   // not change what counts as a word boundary: without this, inserting a
@@ -132,10 +177,28 @@
         for (var i = 0; i < text.length; i++) { outp += text[i]; if (run[i] !== undefined) outp += run[i]; }
         return outp;
       },
-      // recover the digit stream (every zero-width char, in order).
+      // recover the digit stream (every zero-width char, in order) — except the ones
+      // that were already in the cover doing a job.
+      //
+      // U+200D is both a carrier variant and the EMOJI ZERO WIDTH JOINER. A family
+      // emoji is man-ZWJ-woman-ZWJ-girl, and a flag is a tag sequence; read
+      // naively, those joiners come back as payload digits. Measured on the emoji
+      // document in tests/corpus.js: two spurious digits extracted from an UNMARKED
+      // cover, which shifts every real digit after them and desynchronises the
+      // stream. The mark still decoded there because the ECC absorbed two errors,
+      // but that is luck, not design — a document with many emoji would not be.
+      //
+      // A joiner sitting between two pictographic characters is doing emoji work,
+      // not carrying data, so it is skipped. The encoder never inserts there anyway:
+      // anchors are inter-word gaps, and the inside of an emoji cluster is not one.
       extract: function (text) {
         var digits = [];
-        for (var i = 0; i < text.length; i++) { var v = ZW_SET[text[i]]; if (v !== undefined) digits.push(v); }
+        for (var i = 0; i < text.length; i++) {
+          var v = ZW_SET[text[i]];
+          if (v === undefined) continue;
+          if (text.charCodeAt(i) === 0x200D && isPictographic(text, i - 1) && isPictographic(text, i + 1)) continue;
+          digits.push(v);
+        }
         return digits;
       }
     }
@@ -199,7 +262,9 @@
   // scramble interleaves across the whole stream, so a shifted stream cannot be
   // descrambled and sweeping it would produce noise.
   var MAX_PHASE = 32;   // largest block length spab produces (radix-2 packs 32 sites)
-  function phaseCount(key, n) { return key ? 1 : Math.min(MAX_PHASE, n); }
+  // Keyed marks sweep phases too, now that the keyed permutation is block-local and
+  // no longer a function of the carrier count.
+  function phaseCount(key, n) { return Math.min(MAX_PHASE, n); }
   function phaseBits(digits, ph, def, key, id, maxSites) {
     var d = ph ? digits.slice(ph) : digits;
     if (key) d = descramble(d, def.radix, keySeed(key, id));
@@ -208,7 +273,8 @@
 
   // ---------- GF(256) + systematic RLNC fountain (ecc:'rlnc') ----------
   // Rateless erasure code over GF(2^8). Packets are self-checking (CRC) and
-  // self-locating (ESI), spread across all carrier channels; any K clean packets
+  // self-locating (ESI), spread across all carrier channels; any K LINEARLY
+  // INDEPENDENT packets
   // reconstruct the payload, so surviving carriers cover for killed ones.
   var GF_EXP = new Uint8Array(512), GF_LOG = new Uint8Array(256);
   (function () { var x = 1; for (var i = 0; i < 255; i++) { GF_EXP[i] = x; GF_LOG[x] = i; x = (x << 1) ^ (x & 0x80 ? 0x11d : 0); x &= 0xff; } for (i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255]; })();
@@ -223,44 +289,154 @@
     for (var j = 0; j < K; j++) r[j] = g() & 0xff; // repair
     return r;
   }
-  function rlncValue(source, esi) { var K = source.length, c = rlncCoeffs(esi, K), v = 0; for (var j = 0; j < K; j++) v ^= gmul(c[j], source[j]); return v; }
   // Solve for the K source bytes from packets [{esi,val}]; null if under-rank.
-  function rlncSolve(packets, K) {
-    var m = [];
-    for (var p = 0; p < packets.length; p++) { var row = Array.from(rlncCoeffs(packets[p].esi, K)); row.push(packets[p].val); m.push(row); }
-    var nrow = m.length, prow = 0;
+  // ---- why there is no repeat schedule --------------------------------------
+  //
+  // Tried and measured, because the intuition is compelling: if repetition fits four
+  // copies of the payload, a fountain emitting several copies of each symbol ought to
+  // beat it. It does not, and the reason is worth keeping.
+  //
+  // Emitting each equation several times means the decoder needs EVERY equation in
+  // the set to survive at least once. Emitting all-distinct equations means it needs
+  // ANY K of them. The second condition is strictly weaker, so all-distinct wins:
+  //
+  //   saltPepper p=0.1, one channel:
+  //     all-distinct   27 equations recovered, 0 wrong
+  //     repeat + vote  10 equations recovered, 0 wrong   <- fewer to choose from
+  //
+  //   paired recovery over 27 damage models:
+  //     rlnc all-distinct  57%      rlnc repeat + vote  56%
+  //
+  // Bit-level voting across copies was implemented too, and it was not the problem:
+  // it produced no wrong packets at all. It simply had nothing to add, because a
+  // packet that passes its own checksum is already better evidence than a vote.
+  //
+  // So the fountain ALREADY subsumes what repetition gains from copies. The remaining
+  // gap (57% against repetition's 60%) is not a shortage of copies: it is that a
+  // damaged packet is discarded whole, where repetition's per-bit majority salvages a
+  // partially damaged one. Closing it needs an INNER CODE so a packet with a bit
+  // error is repaired rather than thrown away. See dev/roadmap.md.
+
+  // ---- RLNC packet geometry ------------------------------------------------
+  //
+  // A fountain packet is [esi][data][crc]. All three are bit fields; only `data`
+  // must be a whole number of bytes, because that is what GF(256) operates on.
+  //
+  // PACKET WIDTH IS NOT A FREE PARAMETER. The mixed-radix modem groups carrier sites
+  // into 32-bit blocks and the resync sweep re-cuts that grid one site at a time, so
+  // a packet wider than a block is far harder to realign after an insertion or
+  // deletion. Measured on desync damage: 32-bit packets recover 20%, 40-bit 1%,
+  // 64-bit 3%, 96-bit 0%. Widening the packet to buy efficiency costs the failure
+  // mode redundancy cannot fix.
+  //
+  // So the win is a better SPLIT of the same 32 bits, not a wider packet. The
+  // original spent 16 bits on an esi that never exceeds a few hundred and 8 on the
+  // check, leaving 8 for payload. esi:8 doubles the payload at identical width:
+  //
+  //   geometry     width  payload  desync  other damage  paired overall
+  //   16/8/8        32b     25%      20%       46%           48%
+  //   8/16/8        32b     50%      15%       63%           56%   <- default
+  //   16/32/16      64b     50%       3%       50%           53%
+  //   12/128/16    156b     82%       0%       44%           43%
+  //
+  // (repetition scores 60% on the same paired set.)
+  //
+  // The 8-bit esi holds 256 equations, which a long document can exhaust; encode
+  // bounds the count rather than wrapping into colliding ids. Source blocking is the
+  // real fix and is tracked in dev/roadmap.md.
+  var RLNC_PRESETS = {
+    // name        esi  data  crc     width  payload
+    'v1':        { esi: 16, sym: 1, crc: 8 },    // 32b   25%   the original
+    'default':   { esi: 8,  sym: 2, crc: 8 },    // 32b   50%   same width, double payload
+    'wide':      { esi: 16, sym: 4, crc: 16 },   // 64b   50%   two blocks
+    'widest':    { esi: 12, sym: 16, crc: 16 }   // 156b  82%   efficiency at any cost
+  };
+  var RLNC_DEFAULT = 'default';
+
+  function rlncGeom(name) {
+    var g = RLNC_PRESETS[name] || RLNC_PRESETS[RLNC_DEFAULT];
+    return { sym: g.sym, esiBits: g.esi, crcBits: g.crc };
+  }
+  function geomBits(g) { return g.esiBits + g.sym * 8 + g.crcBits; }
+  // The check covers the ESI and the data, truncated to crcBits. Truncating a CRC
+  // weakens it exactly as much as the bits dropped, which is the intended trade.
+  function geomCrcVal(esi, vals, g) {
+    var bytes = [PKT_SEED, (esi >> 8) & 0xff, esi & 0xff].concat(vals);
+    var c = g.crcBits <= 8 ? crc8(bytes) : crc16(bytes);
+    return c & ((1 << g.crcBits) - 1);
+  }
+  // Split the packet bytes into K source symbols of g.sym bytes, zero-padded.
+  function rlncSource(frame, g) {
+    var K = Math.ceil(frame.length / g.sym), out = [];
+    for (var i = 0; i < K; i++) {
+      var sym = [];
+      for (var j = 0; j < g.sym; j++) sym.push(frame[i * g.sym + j] || 0);
+      out.push(sym);
+    }
+    return out;
+  }
+  function rlncValueV(source, esi, g) {
+    var K = source.length, c = rlncCoeffs(esi, K), v = new Array(g.sym), j, i;
+    for (j = 0; j < g.sym; j++) v[j] = 0;
+    for (i = 0; i < K; i++) if (c[i]) for (j = 0; j < g.sym; j++) v[j] ^= gmul(c[i], source[i][j]);
+    return v;
+  }
+  function packetBitsV(esi, vals, g) {
+    var w = new BitWriter();
+    w.u(esi, g.esiBits);
+    for (var i = 0; i < g.sym; i++) w.u(vals[i] & 0xff, 8);
+    w.u(geomCrcVal(esi, vals, g), g.crcBits);
+    return w.bits;
+  }
+  function parsePacketsV(bits, g) {
+    var w = geomBits(g), out = [], np = Math.floor(bits.length / w);
+    for (var p = 0; p < np; p++) {
+      var r = new BitReader(bits, p * w);
+      var esi = r.u(g.esiBits);
+      var vals = [];
+      for (var i = 0; i < g.sym; i++) vals.push(r.u(8));
+      var got = r.u(g.crcBits);
+      if (got !== geomCrcVal(esi, vals, g)) continue;
+      out.push({ esi: esi, val: vals });
+    }
+    return out;
+  }
+  // Gaussian elimination with a VECTOR right-hand side: K coefficient columns
+  // followed by symLen value columns, eliminated once rather than per byte.
+  function rlncSolveV(packets, K, symLen) {
+    var m = [], p, j, i;
+    for (p = 0; p < packets.length; p++) {
+      var row = Array.from(rlncCoeffs(packets[p].esi, K));
+      for (j = 0; j < symLen; j++) row.push(packets[p].val[j]);
+      m.push(row);
+    }
+    var nrow = m.length, prow = 0, W = K + symLen;
     for (var col = 0; col < K && prow < nrow; col++) {
-      var piv = -1; for (var i = prow; i < nrow; i++) if (m[i][col] !== 0) { piv = i; break; }
+      var piv = -1;
+      for (i = prow; i < nrow; i++) if (m[i][col] !== 0) { piv = i; break; }
       if (piv < 0) continue; // cov-ignore: rank-deficient column; distinct-ESI packets give independent rows
       var t = m[prow]; m[prow] = m[piv]; m[piv] = t;
       var invp = ginv(m[prow][col]);
-      for (var j = 0; j <= K; j++) m[prow][j] = gmul(m[prow][j], invp);
-      for (i = 0; i < nrow; i++) if (i !== prow && m[i][col] !== 0) { var f = m[i][col]; for (j = 0; j <= K; j++) m[i][j] ^= gmul(f, m[prow][j]); }
+      for (j = 0; j < W; j++) m[prow][j] = gmul(m[prow][j], invp);
+      for (i = 0; i < nrow; i++) if (i !== prow && m[i][col] !== 0) {
+        var f = m[i][col];
+        for (j = 0; j < W; j++) m[i][j] ^= gmul(f, m[prow][j]);
+      }
       prow++;
     }
-    if (prow < K) return null; // cov-ignore: under-rank system; unreachable with genuine distinct-ESI packets
-    var out = new Uint8Array(K);
-    for (i = 0; i < nrow; i++) { var lead = -1, cnt = 0; for (j = 0; j < K; j++) if (m[i][j] !== 0) { lead = j; cnt++; } if (cnt === 1) out[lead] = m[i][K]; }
-    return out;
-  }
-  // Packet = [esiHi][esiLo][val][crc] = 32 bits. CRC is seeded with a constant so an
-  // all-zero (blank/erased) packet does NOT validate — the "zero is a valid codeword" trap.
-  function packetCrc(b) { return crc8([PKT_SEED, b[0], b[1], b[2]]); }
-  function packetBits(esi, val) {
-    var bytes = [(esi >> 8) & 0xff, esi & 0xff, val & 0xff];
-    bytes.push(packetCrc(bytes));
-    var bits = []; for (var k = 0; k < 4; k++) for (var i = 7; i >= 0; i--) bits.push((bytes[k] >> i) & 1);
-    return bits;
-  }
-  function parsePackets(bits) {
-    var out = []; var np = Math.floor(bits.length / 32);
-    for (var p = 0; p < np; p++) {
-      var b = [0, 0, 0, 0];
-      for (var k = 0; k < 4; k++) { var v = 0; for (var i = 0; i < 8; i++) v = (v << 1) | bits[p * 32 + k * 8 + i]; b[k] = v; }
-      if (packetCrc(b) === b[3]) out.push({ esi: (b[0] << 8) | b[1], val: b[2] });
+    // Under-rank is unreachable with genuine distinct-ESI packets: a K below the
+    // truth still eliminates to full rank and fails the frame checksum instead, and a
+    // K above it is not attempted until enough packets exist.
+    if (prow < K) return null; // cov-ignore: see above
+    var out = new Uint8Array(K * symLen);
+    for (i = 0; i < nrow; i++) {
+      var lead = -1, cnt = 0;
+      for (j = 0; j < K; j++) if (m[i][j] !== 0) { lead = j; cnt++; }
+      if (cnt === 1) for (j = 0; j < symLen; j++) out[lead * symLen + j] = m[i][K + j];
     }
     return out;
   }
+
 
   // ---------- byte / bit helpers ----------
   function crc8(bytes) {
@@ -1054,21 +1230,58 @@
   // obscurity; and it is a COST MULTIPLIER, not confidentiality — that awaits the planned AEAD.
   // Identity when no key, so keyless behavior (and existing vectors) is unchanged.
   function keySeed(key, id) { var s = String(key) + '|' + id, h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  // The keyed layer used to build ONE Fisher-Yates permutation over all `n` digits.
+  // That made the permutation a function of the carrier count, so any edit that
+  // added or removed a site — appending a sentence, quoting an excerpt — changed
+  // every position at once and the stream descrambled to noise. Resynchronisation
+  // had to be switched off for keyed marks as a result, and the cost was measured:
+  // under structural damage, keyed recovery was 27% against unkeyed's 97%, and the
+  // correlation with carrier-count change was exact. Every model that preserved the
+  // count recovered; every model that changed it scored zero.
+  //
+  // Now the permutation is over a FIXED-SIZE BLOCK and is identical for every block,
+  // so it does not depend on `n` at all. A shift of k sites moves which block a
+  // digit lands in but not the permutation itself, and the phase sweep — which
+  // tries "assume p digits were dropped from the front" for p in 0..31 — realigns
+  // it. Whitening stays keyed to absolute index, which the same sweep re-derives.
+  //
+  // The cost, stated plainly: a permutation that repeats every KEY_BLOCK digits is
+  // weaker than a global one. That is the right trade now in a way it was not
+  // before 0.5.0 — `key` is documented as a cost multiplier rather than
+  // confidentiality, and `encKey` (AES-256-GCM) is the real confidentiality
+  // mechanism. Resynchronisable keyed marks are worth more than an unbreakable
+  // interleave on a mark that any edit destroys.
+  var KEY_BLOCK = 32;   // <= MAX_PHASE, so one phase always realigns the grid
+
   function keyStreams(n, radix, seed) {
-    var g = prng32(seed), perm = new Array(n), pn = new Array(n), i, j, t;
-    for (i = 0; i < n; i++) perm[i] = i;
-    for (i = n - 1; i > 0; i--) { j = g() % (i + 1); t = perm[i]; perm[i] = perm[j]; perm[j] = t; } // Fisher–Yates
-    for (i = 0; i < n; i++) pn[i] = g() % radix;
-    return { perm: perm, pn: pn };
+    var g = prng32(seed), b = Math.min(KEY_BLOCK, n), perm = new Array(b), i, j, t;
+    for (i = 0; i < b; i++) perm[i] = i;
+    for (i = b - 1; i > 0; i--) { j = g() % (i + 1); t = perm[i]; perm[i] = perm[j]; perm[j] = t; } // Fisher-Yates
+    // Whitening is block-local for the same reason the permutation is. Keying it to
+    // ABSOLUTE index left one failure standing: quoting the last two thirds of a
+    // document drops ~125 sites off the front, and no sweep over 32 phases can undo
+    // a shift that large. Repeating every KEY_BLOCK makes any shift equivalent to
+    // shift mod 32, which the sweep does cover. Whitening exists for energy
+    // dispersal, not secrecy, so a repeating sequence costs little here.
+    var pn = new Array(b);
+    for (i = 0; i < b; i++) pn[i] = g() % radix;
+    return { perm: perm, pn: pn, block: b };
+  }
+  // Map position i to its permuted position within i's own block. A trailing
+  // partial block is left in place: permuting it would need a different-sized
+  // permutation, which is exactly the n-dependence this removes.
+  function keyIndex(ks, i, n) {
+    var base = i - (i % ks.block);
+    return (base + ks.block <= n) ? base + ks.perm[i % ks.block] : i;
   }
   function scramble(digits, radix, seed) {
     var n = digits.length, ks = keyStreams(n, radix, seed), out = new Array(n), i;
-    for (i = 0; i < n; i++) out[ks.perm[i]] = (digits[i] + ks.pn[i]) % radix; // whiten then interleave
+    for (i = 0; i < n; i++) out[keyIndex(ks, i, n)] = (digits[i] + ks.pn[i % ks.block]) % radix; // whiten then interleave
     return out;
   }
   function descramble(physical, radix, seed) {
     var n = physical.length, ks = keyStreams(n, radix, seed), out = new Array(n), i;
-    for (i = 0; i < n; i++) out[i] = ((physical[ks.perm[i]] - ks.pn[i]) % radix + radix) % radix;
+    for (i = 0; i < n; i++) out[i] = ((physical[keyIndex(ks, i, n)] - ks.pn[i % ks.block]) % radix + radix) % radix;
     return out;
   }
 
@@ -1089,7 +1302,11 @@
     });
     var frameBits = packet.bits;
     var frame = packet.bytes;
-    var K = frame.length; // RLNC source symbols (= packet bytes, padded to a byte boundary)
+    // RLNC source symbols. With the default 1-byte symbol this is one per packet
+    // byte, exactly as before; a larger params.rlncSymbol groups them.
+    var geom = rlncGeom(params.rlncGeom);
+    var rlncSrc = rlncSource(frame, geom);
+    var K = rlncSrc.length;
     var arr = cover.split('');
     var channels = {}, issues = [], primary = null;
     var esiBase = 0; // RLNC: channels emit DISJOINT esi ranges so their packets combine
@@ -1161,13 +1378,32 @@
       var bits, reps, tooShort;
 
       if (ecc === 'rlnc') {
-        // Fill capacity with self-checking/self-locating fountain packets (32 bits each),
-        // using a global esi so every channel carries distinct packets (they pool on decode).
-        var nPk = Math.floor(cap / 32);
+        // Fill capacity with self-checking/self-locating fountain packets, using a
+        // global esi so every channel carries distinct packets (they pool on decode).
+        var pw = geomBits(geom);
+        var nPk = Math.floor(cap / pw);
+        // The ESI is a fixed-width field and `esiBase` advances across carrier
+        // classes, so a long enough document runs out of distinct ids. Emitting past
+        // that point WRAPS, producing two different equations that claim the same
+        // esi — the pool keeps whichever arrives first and the solve is quietly
+        // wrong. Stop instead. Source blocking (a per-chunk id) is the real fix and
+        // is not needed until the cover exceeds roughly a quarter-million
+        // characters, which is a book; see dev/roadmap.md.
+        var esiSpace = (1 << geom.esiBits);
         tooShort = nPk < K;
         bits = [];
-        for (var e = 0; e < nPk; e++) { var esi = esiBase + e; bits = bits.concat(packetBits(esi, rlncValue(frame, esi))); }
-        esiBase += nPk;
+        // Emit distinct equations until the esi space runs out, then WRAP and emit
+        // them again. rlncCoeffs(esi, K) is a pure function, so esi 5 always encodes
+        // the same equation — a wrapped packet is an identical DUPLICATE, not a
+        // second equation claiming the same id. The decoder pools by esi and keeps
+        // the first valid copy, so a duplicate is simply a second chance at that
+        // equation. Capping the count instead would throw away capacity on exactly
+        // the documents that have the most of it to spare.
+        for (var e = 0; e < nPk; e++) {
+          var esi = (esiBase + e) % esiSpace;
+          bits = bits.concat(packetBitsV(esi, rlncValueV(rlncSrc, esi, geom), geom));
+        }
+        esiBase = (esiBase + nPk) % esiSpace;
         while (bits.length < cap) bits.push(0);
         bits = bits.slice(0, cap);
         reps = nPk;
@@ -1235,6 +1471,10 @@
         encrypted: packet.enc !== ENC.none,
         checksum: 'crc' + cksumBits(packet.cksum),
         checksumBits: cksumBits(packet.cksum),
+        rlncGeom: ecc === 'rlnc' ? (params.rlncGeom || RLNC_DEFAULT) : undefined,
+        rlncSymbolBytes: ecc === 'rlnc' ? geom.sym : undefined,
+        rlncPacketBits: ecc === 'rlnc' ? geomBits(geom) : undefined,
+        rlncK: ecc === 'rlnc' ? K : undefined,
         channels: channels,
         slots: pc.sites,             // back-compat: primary/strongest channel
         capacityBits: pc.capacityBits,
@@ -1263,6 +1503,16 @@
     if (!frameBits || frameBits > total) return notDetected();
     var reps = Math.floor(total / frameBits); // frameBits ≥ 32, so this is ≥ 1 here
 
+    // Plain per-bit majority vote, deliberately.
+    //
+    // A reliability-weighted vote was built and measured, using per-site confidence
+    // from the soft layer (SPAB.soft) to down-weight blocks holding more ambiguous
+    // default glyphs. It never helped and twice hurt: scattered folding at 5% went
+    // 56% -> 50%, at 20% went 6% -> 0%. The reason is that the weight cannot tell a
+    // DAMAGED default glyph from a legitimately sent one — about 1/radix of sites
+    // carry the default value in an intact stream — so it penalises good blocks for
+    // their content. Soft information is real and the detector exposes it, but this
+    // is not where it pays. Recorded in dev/roadmap.md so it is not rebuilt.
     var folded = [], agSum = 0, agCnt = 0;
     for (var b = 0; b < frameBits; b++) {
       var ones = 0, cnt = 0;
@@ -1309,7 +1559,7 @@
   // here, which is what the version field exists to make explicit rather than a
   // guess. That is a wire-format break and is why this is a minor bump.
   function frameToResult(bytes, extra, opts) {
-    // cov-ignore: rlncSolve always returns at least K ≥ 4 bytes
+    // cov-ignore: rlncSolveV always returns at least K x symbol bytes
     if (!bytes || bytes.length < 4) return Object.assign(notDetected(), extra);
     var f = parseFrameBits(bytesToBits(bytes), 0);
     if (!f) {
@@ -1376,8 +1626,19 @@
       { agreement: 1, reps: best.n, resynced: true });
   }
 
-  // RLNC decode: pool self-checking packets from ALL channels, recover any K.
+  // RLNC decode: pool self-checking packets from ALL channels and solve.
+  //
+  // The requirement is K linearly INDEPENDENT equations, not merely K packets. The
+  // systematic ESIs (0..K-1) are independent by construction; repair rows are random
+  // over GF(256) and independent with overwhelming probability, but an arbitrary set
+  // of K rows is not guaranteed full rank. rlncSolveV detects an under-rank system and
+  // returns null rather than a wrong answer, and callers should collect K + a few
+  // repair packets rather than exactly K.
   function decodeRLNC(text, ids, key, maxSites, opts) {
+    // The geometry is not carried on the wire, so encode and decode must be given
+    // the same params.rlncSymbol — like ecc and classes. If it earns its keep it
+    // should move into the packet header rather than stay a shared assumption.
+    var geom = rlncGeom(opts && opts.rlncGeom);
     var pool = {}, count = 0;
 
     // Pool packets from one block-grid phase across every channel.
@@ -1385,7 +1646,7 @@
       ids.forEach(function (id) {
         var def = CLASS_DEFS[id], digits = classDigits(text, id);
         if (ph >= phaseCount(key, digits.length)) return;
-        parsePackets(phaseBits(digits, ph, def, key, id, maxSites)).forEach(function (pk) {
+        parsePacketsV(phaseBits(digits, ph, def, key, id, maxSites), geom).forEach(function (pk) {
           if (!(pk.esi in pool)) { pool[pk.esi] = pk.val; count++; }
         });
       });
@@ -1399,19 +1660,19 @@
     // sweep is held back until there is nothing to lose by trying it.
     addPhase(0);
     // K = source symbols = frame length = len + 3; get len from systematic packet esi=1 if clean.
+    // K is not carried anywhere, so it is guessed. K = ceil(packetBytes / symbol),
+    // and the packet's own header states its length once the solve succeeds — so a
+    // wrong K simply fails the packet checksum and the next candidate is tried.
+    // Solving for a K larger than the truth yields trailing padding, which
+    // parseFrameBits ignores because it reads the length from the header.
     function attempt() {
       var pk = Object.keys(pool).map(function (e) { return { esi: +e, val: pool[e] }; });
-      var cand = [];
-        // K = frame length = content length + framing. The length now lives in byte 3
-      // of the frame, so the systematic packet that carries it is esi 3, not 1.
-      if (3 in pool) cand.push(pool[3] + 5);
-      for (var Kg = 4; Kg <= 80; Kg++) if (cand.indexOf(Kg) < 0) cand.push(Kg);
-      for (var ci = 0; ci < cand.length; ci++) {
-        var K = cand[ci];
+      var maxK = Math.ceil(320 / geom.sym);
+      for (var K = Math.max(1, Math.ceil(4 / geom.sym)); K <= maxK; K++) {
         if (pk.length < K) continue;
-        var src = rlncSolve(pk, K);
-        if (!src) continue; // cov-ignore: pairs with rlncSolve's under-rank return (unreachable with genuine packets)
-        var res = frameToResult(src, { channel: 'rlnc', packets: count }, opts);
+        var src = rlncSolveV(pk, K, geom.sym);
+        if (!src) continue; // cov-ignore: under-rank; unreachable with genuine distinct-ESI packets
+        var res = frameToResult(Array.from(src), { channel: 'rlnc', packets: count }, opts);
         if (res.crcOk) return res;
       }
       return null;
@@ -1436,6 +1697,20 @@
     return { status: 'failed', message: null, confidence: 0, crcOk: false, packets: count, channel: 'rlnc' };
   }
 
+  // How channels are compared when more than one returns something. Exported as
+  // `algorithm.statusRank` so a test can assert that every status the codec emits is
+  // ranked — an unranked status compares as undefined, every comparison against it
+  // is false, and the first channel examined silently wins.
+  var STATUS_RANK = {
+    perfect: 6, corrected: 5,        // payload in hand
+    encrypted: 4,                    // located, verified, needs a key
+    'auth-failed': 3,                // located, verified, wrong key
+    unsupported: 2,                  // located, verified, algorithm not implemented
+    corrupt: 2,                      // located, verified, content would not open
+    failed: 1,                       // something was there, checksum did not hold
+    'not-detected': 0
+  };
+
   // ---------- decode ----------
   // Try each enabled class independently; return the best-decoding channel.
   function decode(text, params) {
@@ -1458,7 +1733,23 @@
         checksum: r.checksum, checksumBits: r.checksumBits, detail: r.detail,
         messageBytes: r.messageBytes, bytes: r.bytes } };
     }
-    var rank = { perfect: 3, corrected: 2, failed: 1, 'not-detected': 0 };
+    // Channel ranking — see STATUS_RANK. EVERY status a channel can return must appear
+    // there: an
+    // unranked status compares as undefined, every comparison against it is false,
+    // and the first channel examined wins by default.
+    //
+    // That is exactly what happened. 0.5.0 added `unsupported`, `encrypted`,
+    // `auth-failed` and `corrupt` without adding them here, so a `ws` channel
+    // returning `unsupported` — a located, checksum-valid packet this build could
+    // not open — silently blocked the `zwsp` channel's `perfect` result later in the
+    // list. Encode reported five copies and no issues; decode returned null. Found
+    // by r_and_d/capacity.js at a 100K cover with a 4KB payload.
+    //
+    // The ordering that matters: a channel that RECOVERED A PAYLOAD always beats one
+    // that did not, whatever else it reports. Below that, a located-but-unopenable
+    // packet beats nothing at all, because it is real information for the caller.
+    var rank = STATUS_RANK;
+    var hasMessage = function (c) { return c && c.message !== null && c.message !== undefined; };
     var best = null, bestId = null;
     ids.forEach(function (id) {
       var c = foldParse(readClassBits(text, id, key, maxSites), params);
@@ -1467,10 +1758,19 @@
       // intact copies together with noise. A single self-contained packet is enough
       // on its own — it carries its own checksum — so go looking for one.
       if (!c.crcOk) { var r = scanFrame(text, id, key, maxSites, params); if (r) c = r; }
+      // A recovered payload wins outright — crcOk alone is not enough, because a
+      // packet can verify and still fail to open.
+      // The `undefined -> 0` fallbacks are unreachable: tests/branches.test.js asserts
+      // every emitted status is ranked. They stay because if that ever stops being
+      // true, an unranked status should sort LAST — which cannot mask a channel that
+      // recovered a payload — rather than compare as undefined and win by accident,
+      // which is the bug this whole block exists to prevent.
+      var cRank = rank[c.status] === undefined ? 0 : rank[c.status];   // cov-ignore: see above
+      var bRank = best ? (rank[best.status] === undefined ? 0 : rank[best.status]) : -1;   // cov-ignore: see above
       var better = !best ||
-        (c.crcOk && !best.crcOk) ||
-        (c.crcOk === best.crcOk && (rank[c.status] > rank[best.status] ||
-          (rank[c.status] === rank[best.status] && c.confidence > best.confidence)));
+        (hasMessage(c) && !hasMessage(best)) ||
+        (hasMessage(c) === hasMessage(best) && (cRank > bRank ||
+          (cRank === bRank && c.confidence > best.confidence)));
       if (better) { best = c; bestId = id; }
     });
     if (!best) return { message: null, metadata: { status: 'not-detected', confidence: 0 } };
@@ -1492,6 +1792,130 @@
     };
   }
 
+
+  // ---------- soft layer: channel estimation and the likelihood field ----------
+  //
+  // The shipping demodulator reads each site as an exact digit and throws away how
+  // sure it was. That discards real information, because THE CHANNEL IS ASYMMETRIC:
+  // normalization, typography correction and whitespace collapse all fold carrier
+  // variants back onto the default glyph, and nothing does the reverse. No pipeline
+  // turns a plain space into a thin space.
+  //
+  // So the two observations are not equally informative:
+  //   - a NON-DEFAULT variant is near-certain — only the encoder puts one there;
+  //   - the DEFAULT glyph is ambiguous — it may have been sent, or it may be any
+  //     variant that got collapsed on the way.
+  //
+  // How ambiguous depends on how much collapsing happened, and that is measurable
+  // from the carrier histogram itself: an intact marked stream is close to uniform
+  // over the radix, so excess mass on the default value is the signature of
+  // collapse. That is channel estimation with no pilots — the histogram IS the
+  // pilot. See dev/roadmap.md.
+  var SOFT_EPS = 0.02;   // residual doubt on a non-default observation
+
+  // Fraction of sites that look collapsed. If a fraction f of a uniform stream is
+  // folded onto value 0, then h[0] ~ n/r + n*f*(1 - 1/r), so f follows from the
+  // excess. Returns 0 for an intact stream, ->1 for a fully normalized one.
+  function estimateCollapse(digits, radix) {
+    var n = digits.length;
+    if (!n) return 0;
+    var h0 = 0;
+    for (var i = 0; i < n; i++) if (digits[i] === 0) h0++;
+    var excess = h0 - n / radix;
+    if (excess <= 0) return 0;
+    return Math.min(0.99, excess / (n * (1 - 1 / radix)));
+  }
+
+  // P(sent = v | observed), as a vector over the radix.
+  function softDigit(observed, radix, collapse) {
+    var p = new Array(radix), v;
+    if (observed !== 0) {
+      for (v = 0; v < radix; v++) p[v] = SOFT_EPS / (radix - 1);
+      p[observed] = 1 - SOFT_EPS;
+      return p;
+    }
+    // The default glyph: either it was sent, or a variant collapsed onto it.
+    var sent0 = 1 / radix, collapsed = collapse / radix, tot = sent0 + (radix - 1) * collapsed;
+    p[0] = sent0 / tot;
+    for (v = 1; v < radix; v++) p[v] = collapsed / tot;
+    return p;
+  }
+
+  // Per-site posterior over the radix, plus the channel estimate that produced it.
+  function classSoft(text, id) {
+    var digits = classDigits(text, id), radix = CLASS_DEFS[id].radix;
+    var collapse = estimateCollapse(digits, radix), out = new Array(digits.length);
+    for (var i = 0; i < digits.length; i++) out[i] = softDigit(digits[i], radix, collapse);
+    return { digits: digits, radix: radix, collapse: collapse, posteriors: out };
+  }
+
+  // Confidence that a site's hard read is right — max of its posterior. 1/radix
+  // means "no information", 1 means certain.
+  function siteConfidence(p) {
+    var m = 0;
+    for (var i = 0; i < p.length; i++) if (p[i] > m) m = p[i];
+    return m;
+  }
+
+  // ---------- the sliding histogram detector ----------
+  //
+  // Slide a window of `n` sites and, at each position, report the histogram of
+  // carrier values and how far it sits from the uniform distribution an encoded
+  // stream produces. This is the acquisition primitive the architecture asks for:
+  // its output is a FIELD over position, not a symbol stream, and a caller (or a
+  // later sequence decoder) picks structure out of it.
+  //
+  // Why a window rather than the whole document: marks are local. A document that
+  // is half marked and half pasted-in plain text has a uniform histogram over the
+  // marked half and a spike at the default over the other, and only a sliding view
+  // can see the boundary. The window is advanced incrementally — one site out, one
+  // site in — so the whole field costs O(sites), not O(sites x n).
+  function likelihoodField(text, id, n) {
+    var d = classSoft(text, id), digits = d.digits, radix = d.radix;
+    n = n || Math.min(32, digits.length);
+    var out = [];
+    if (!digits.length || n <= 0 || n > digits.length) return { window: n, radix: radix, collapse: d.collapse, field: out };
+    var h = new Array(radix), i, v;
+    for (v = 0; v < radix; v++) h[v] = 0;
+    for (i = 0; i < n; i++) h[digits[i]]++;
+    for (var pos = 0; pos + n <= digits.length; pos++) {
+      if (pos > 0) { h[digits[pos - 1]]--; h[digits[pos + n - 1]]++; }
+      // Chi-square against uniform. A marked window sits near 0; unmarked prose,
+      // where every site is the default glyph, sits at its maximum.
+      var expct = n / radix, chi = 0;
+      for (v = 0; v < radix; v++) chi += (h[v] - expct) * (h[v] - expct) / expct;
+      var chiMax = n * (radix - 1);      // all mass on one value
+      out.push({ at: pos, counts: h.slice(), chi2: +chi.toFixed(4),
+        marked: +Math.max(0, 1 - chi / chiMax).toFixed(4) });
+    }
+    return { window: n, radix: radix, collapse: d.collapse, field: out };
+  }
+
+  // Public: the likelihood field for every enabled carrier class, plus the per-site
+  // posteriors. Exposed because the physical layer should be inspectable on its own
+  // — a caller diagnosing a failed decode wants to see WHERE the mark stopped
+  // looking like a mark, which a boolean cannot say.
+  function detect(text, params) {
+    params = params || {};
+    var ids = resolveClasses(params), n = params.window || 0, out = {};
+    ids.forEach(function (id) {
+      var soft = classSoft(text, id);
+      var lf = likelihoodField(text, id, n || Math.min(32, soft.digits.length));
+      var confSum = 0;
+      for (var i = 0; i < soft.posteriors.length; i++) confSum += siteConfidence(soft.posteriors[i]);
+      out[id] = {
+        sites: soft.digits.length,
+        radix: soft.radix,
+        collapse: +soft.collapse.toFixed(4),
+        meanConfidence: soft.digits.length ? +(confSum / soft.digits.length).toFixed(4) : 0,
+        window: lf.window,
+        field: lf.field,
+        posteriors: soft.posteriors
+      };
+    });
+    return out;
+  }
+
   // ---------- introspection (ws-only, back-compat) ----------
   function getSlots(text) { return CLASS_DEFS.ws.detect(text); } // whitespace sites
   function histogram(text) {
@@ -1501,14 +1925,15 @@
   }
 
   // ---------- version / algorithm descriptor ----------
-  var VERSION = '0.5.0';
+  var VERSION = '0.5.1';
   var algorithm = {
     version: VERSION,
     name: 'plugsym-rep+rlnc',
     summary: 'Pluggable symbol library, independent parallel per-class channels. Two ECC ' +
              'modes: repetition+majority (default) per channel, or a GF(256) systematic ' +
              'RLNC fountain (ecc:"rlnc") whose self-checking/self-locating 32-bit packets ' +
-             'pool across channels so surviving carriers reconstruct any K. Default carriers ' +
+             'pool across channels so surviving carriers reconstruct from any K linearly ' +
+             'independent packets. Default carriers ' +
              '= whitespace + confusables (quote, hyphen), co-equal; whitespace is NFKC-fragile, ' +
              'confusables survive NFKC. Wire format v2 packets (dev/wire-format.md).',
     classes: {
@@ -1564,6 +1989,7 @@
     },
     modem: { type: 'mixed-radix', blocked: true, blockCapBits: 32, note: 'ECC bit stream is packed into per-site carrier symbols by blocked mixed-radix (base) conversion, recovering fractional bits of non-power-of-two radices; blocks bound a damaged symbol to ≤32 bits' },
     coding: { symbolLayer: 'mixed-radix (blocked)', blocks: true, interleave: 'keyed (opt-in)', pn: 'keyed (opt-in)', softDecision: false },
+    statusRank: STATUS_RANK,
     resync: {
       phases: MAX_PHASE,
       note: 'Inserting or deleting a carrier site shifts the whole symbol stream, so blocks are cut one position off and everything after the edit decodes to noise — redundancy does not help, because every copy shifts together. The decoder therefore re-cuts the block grid at each phase: RLNC pools packets from all phases (32-bit aligned, so chance CRC hits stay out of the solve), and repetition falls back to scanning for one intact self-contained packet when majority folding fails. Disabled when a key is set: the keyed interleave spans the whole stream and cannot be undone on a shifted one.'
@@ -1607,6 +2033,9 @@
     encode: encode,
     decode: decode,
     histogram: histogram,
+    detect: detect,
+    soft: { classSoft: classSoft, estimateCollapse: estimateCollapse, softDigit: softDigit,
+      siteConfidence: siteConfidence, likelihoodField: likelihoodField },
     readClassBits: readClassBits,
     COMP: COMP,
     ENC: ENC,
@@ -1629,4 +2058,11 @@
 
   if (typeof module !== 'undefined' && module.exports) module.exports = SPAB;
   root.SPAB = SPAB;
-})(typeof window !== 'undefined' ? window : this);
+  // The browser arm below IS exercised: tests/branches.test.js sets global.window,
+  // re-requires the module and asserts window.SPAB, and that assertion passes on
+  // every supported Node. What varies is V8's BLOCK ATTRIBUTION for a re-required
+  // script — Node 22 credits the arm, 18 and 20 do not — so gating on it would make
+  // the coverage number a function of the runtime rather than of the tests. The
+  // marker sits on the code line itself because coverage.js only looks at the block's
+  // own line and the one directly above it.
+})(typeof window !== 'undefined' ? window : this); // cov-ignore: see above (V8 attribution differs by Node version)

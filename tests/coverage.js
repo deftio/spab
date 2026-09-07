@@ -29,6 +29,7 @@ const SUITES = [
   ['tests/branches.test.js', []],
   ['tests/wire.test.js', []],
   ['tests/noise.test.js', []],
+  ['tests/corpus.test.js', []],
   ['tests/fuzz.test.js', ['--iterations', '400']]
 ].filter(function (s) { return fs.existsSync(path.resolve(ROOT, s[0])); });
 

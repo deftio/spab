@@ -25,6 +25,7 @@ jobs:
         run: |
           for f in src/js/spab.js src/js/cli.js cli/spabdemo.js tests/roundtrip.test.js \
                    tests/branches.test.js tests/noise.test.js tests/fuzz.test.js \
+                   tests/corpus.test.js tests/corpus.js tests/wire.test.js \
                    tests/coverage.js tests/lint.js \
                    r_and_d/harness.js r_and_d/corruptions.js r_and_d/corpus-gen.js \
                    r_and_d/corpus-fs.js r_and_d/payloads.js r_and_d/provenance.js \
@@ -39,21 +40,24 @@ jobs:
         run: node tests/branches.test.js
       - name: Noise matrix
         run: node tests/noise.test.js
+      - name: Corpus matrix
+        run: node tests/corpus.test.js
       - name: Harness smoke
         run: node r_and_d/harness.js --gen 500 --no-log
       - name: Symbol-survival smoke
         run: node r_and_d/symbol-survival.js --gen 500
 
-      # --- hygiene, MEASURED but NOT gating yet (flip to blocking later) ---
-      # Fuzzing and 100% branch coverage are enforced by intent, not by CI failure,
-      # until they've proven stable across the matrix. Remove continue-on-error (and
-      # use `npm run coverage:strict`) to make them required.
-      - name: Fuzz (report only)
-        continue-on-error: true
+      # --- hygiene, now BLOCKING ---
+      # These were report-only while the codec was moving fast. They are gates now:
+      # the wire format is being frozen for language ports, and a port is written
+      # against whatever the reference implementation actually does. A coverage or
+      # fuzz regression that lands silently becomes a conformance vector that
+      # enshrines it. 100% branch coverage and a clean fuzz run have held across
+      # every run since; there is nothing left to wait for.
+      - name: Fuzz
         run: node tests/fuzz.test.js --iterations 3000
-      - name: Coverage (report only)
-        continue-on-error: true
-        run: node tests/coverage.js
+      - name: Coverage (100% functions/lines/branches)
+        run: node tests/coverage.js --strict
 
   # A conversation identifier in a commit message is permanent once pushed: the
   # commit object stays fetchable by SHA, the PR timeline keeps the record, and a

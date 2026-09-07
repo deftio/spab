@@ -1,21 +1,19 @@
-# spab glossary
+# spab research glossary
 
-Shared vocabulary so the docs, code, and API stay consistent. When a term here has a
-precise meaning, use it that way everywhere (identifiers, comments, metadata keys).
+**Shipping vocabulary lives in [`docs/glossary.md`](../../docs/glossary.md)** — carrier
+classes, the wire format, transforms, status words, and everything the API exposes.
+That file is checked against the implementation by `tests/wire.test.js`.
 
-## Text & payload
+This file is the **design and research** vocabulary: terms for schemes that are
+proposed, exploratory, or deliberately not built. It is not checked against anything,
+because most of it describes things that do not exist yet.
 
-- **Cover text** — the visible text that carries the mark. Never altered visibly (beyond
-  carrier substitution).
-- **Payload** — the bytes being hidden. The generic thing spab transports.
-- **Message** — a payload interpreted as a value per its type (string, uuid, json…).
-  "Message" is the user-facing form; "payload" is the byte form.
-- **Type** — a small tag (2–3 bits) saying how to interpret the payload bytes
-  (`bytes` / `string` / `json` / `uuid` / `program` / …).
-- **Frame** — the serialized container written into the channel:
-  `[magic][len][content][crc]` in the baseline. Adds sync + integrity to the payload.
-- **Magic** — a fixed sync/sanity byte (0xA5 in the baseline) that lets `decode` reject
-  un-watermarked or stripped text instead of inventing a payload.
+That distinction is why this file was split. It previously carried both, and the
+shipping half rotted: it documented a `[magic][len][content][crc]` frame two formats
+after that frame was retired, called the type field "2–3 bits" when it is 5, named
+Reed–Solomon as the baseline code when the codec has never used one, and listed a
+`tampered` status that was never implemented. A glossary nobody tests is a glossary
+that lies eventually.
 
 ## Channel & symbols
 
@@ -35,8 +33,10 @@ precise meaning, use it that way everywhere (identifiers, comments, metadata key
 ## In-band problem
 
 - **In-band problem** — carrier glyphs can occur naturally in the cover text, so a naive
-  reader can't tell hidden symbols from incidental ones. spab addresses it with the slot
-  model + encode-time **normalization**.
+  reader cannot tell hidden symbols from incidental ones. spab addresses it with the slot
+  model plus encode-time **normalization**. A live instance: U+200D is both a zero-width
+  carrier variant and the emoji joiner, so a family emoji's own joiners were read as
+  payload until the extractor learned to skip joiners between pictographs.
 - **Normalization (encode-time)** — resetting carrier positions to a canonical base before
   writing, so every read slot value is one spab placed.
 - **Desync** — an insertion/deletion that shifts the slot/symbol stream out of alignment.
@@ -45,8 +45,9 @@ precise meaning, use it that way everywhere (identifiers, comments, metadata key
 ## Coding & ECC
 
 - **ECC** — error-correcting code applied to the symbol stream so corruption can be healed.
-- **RS** — Reed–Solomon; the baseline/erasure-friendly code. Corrects up to `n/2` byte
-  errors for `n` parity bytes (≈2× as many erasures).
+- **RS** — Reed–Solomon. A candidate inner code, **not** what spab uses: the shipping
+  codec offers repetition and a GF(256) RLNC fountain. Listed because it keeps coming
+  up as an option for the inner-code slot (see `dev/roadmap.md`).
 - **Erasure vs. error** — an *erasure* is a lost symbol at a *known* position (cheaper to
   fix); an *error* is a wrong symbol at an unknown position.
 - **Fountain / rateless code** — (LT, Raptor) emits as many coded symbols as capacity
@@ -139,9 +140,3 @@ precise meaning, use it that way everywhere (identifiers, comments, metadata key
 - **R&D corpus** — the large (25k–100k) deterministic generated set for tuning/statistics.
 - **CI subset** — the small fixed prefix of the same generator, run on every commit.
 
-## Status words (decode `metadata.status`)
-
-- **`perfect`** — recovered with full bit agreement and valid integrity check.
-- **`corrected`** — recovered via ECC after some corruption; integrity check passed.
-- **`failed`** — a frame was detected (magic seen) but the payload didn't validate.
-- **`not-detected`** — no spab frame found (clean text, or fully stripped).

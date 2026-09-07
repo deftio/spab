@@ -161,6 +161,15 @@ function collapseWhitespace(text) {
   return text.replace(/[ \u2006\u2009\u200A\t]+/g, ' ');
 }
 
+// Both destructions at once, which is what a lot of real software does: an editor or
+// renderer that normalises spacing AND drops invisible characters. Testing the two
+// separately flatters BOTH carrier families -- a whitespace scheme sails through
+// stripZw, an insertion scheme sails through collapseWs -- and neither number
+// describes a pipeline that does both.
+function sanitisingPaste(text) {
+  return collapseWhitespace(text).replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '');
+}
+
 // Extraction from PDF or a rendered page: whitespace collapses AND line breaks
 // become spaces, so paragraph structure is flattened too.
 function extractText(text) {
@@ -325,6 +334,8 @@ var MODELS = {
     note: 'keepFrac = TAIL kept (mirror of truncate; fair to payload placement)' },
   midExcerpt:  { fn: middleExcerpt, intensities: [0.5, 0.25], real: true,
     note: 'keepFrac = middle slice kept (neither end survives)' },
+  sanitisePaste: { fn: function (t) { return sanitisingPaste(t); }, intensities: [1], real: true,
+    note: 'editor/renderer that BOTH collapses whitespace and strips invisible characters' },
   stripZw:     { fn: function (t) { return stripZeroWidth(t); }, intensities: [1], real: true, zw: true,
     note: 'sanitiser strips invisible characters — total loss for zero-width schemes' },
   zwNoise:     { fn: zeroWidthNoise, intensities: [0.1, 0.3], zw: true,

@@ -740,8 +740,255 @@ console.log('\n-- 12b. the build reports itself truthfully --');
   eq(SPAB.version().carriers.length, before, 'version() returns a fresh object each call, not shared state');
 })();
 
+// ============================================================ 12b2. rlnc geometry
+console.log('\n-- 12b2. rlnc packet geometry --');
+
+(function () {
+  var COVER = ('The board reviewed the quarterly figures on Tuesday and asked for a re-forecast ' +
+    'before the end of the month. Operating costs are down year-over-year, though the delays ' +
+    "on the Hartley contract haven't yet worked through the numbers. ").repeat(20);
+  var GEOMS = { 'v1': 32, 'default': 32, 'wide': 64, 'widest': 156 };
+
+  eq(SPAB.encode(COVER, 'x', { ecc: 'rlnc' }).metadata.rlncGeom, 'default',
+    'rlnc uses the default geometry when none is named');
+
+  for (const name of Object.keys(GEOMS)) {
+    const p = { ecc: 'rlnc', rlncGeom: name };
+    const e = SPAB.encode(COVER, 'acme-42', p);
+    eq(e.metadata.rlncPacketBits, GEOMS[name], 'geometry "' + name + '" is ' + GEOMS[name] + ' bits');
+    eq(e.metadata.rlncK, Math.ceil(e.metadata.frameBytes / e.metadata.rlncSymbolBytes),
+      'geometry "' + name + '" gives K = ceil(bytes / symbol)');
+    eq(SPAB.decode(e.text, p).message, 'acme-42', 'geometry "' + name + '" round-trips');
+  }
+
+  // The default doubles the payload share at the SAME width as v1. That is the whole
+  // point of it: packet width is coupled to the 32-bit modem block, so efficiency has
+  // to come out of the esi rather than out of a wider packet.
+  const v1 = SPAB.encode(COVER, 'acme-42', { ecc: 'rlnc', rlncGeom: 'v1' }).metadata;
+  const df = SPAB.encode(COVER, 'acme-42', { ecc: 'rlnc', rlncGeom: 'default' }).metadata;
+  eq(v1.rlncPacketBits, df.rlncPacketBits, 'the default is the same packet width as v1');
+  ok(df.rlncSymbolBytes === 2 * v1.rlncSymbolBytes, 'and carries twice the payload per packet');
+  ok(df.rlncK < v1.rlncK, 'so it needs fewer packets for the same frame (' + df.rlncK + ' vs ' + v1.rlncK + ')');
+
+  // Every geometry must survive the damage classes, not just a clean round trip.
+  const DAMAGE = {
+    'delete a word': t => t.replace(/\s\S+/, ''),
+    'prepend': t => 'A new sentence in front. ' + t,
+    'append': t => t + ' And one at the end.',
+    'first half': t => t.slice(0, Math.floor(t.length / 2)),
+    'smart quotes': t => t.replace(/'/g, '\u2019')
+  };
+  let wrong = 0, trials = 0;
+  for (const name of Object.keys(GEOMS)) {
+    const p = { ecc: 'rlnc', rlncGeom: name };
+    const e = SPAB.encode(COVER, 'acme-42', p);
+    if (SPAB.decode(e.text, p).message !== 'acme-42') continue;
+    for (const [dn, f] of Object.entries(DAMAGE)) {
+      trials++;
+      const got = SPAB.decode(f(e.text), p).message;
+      if (got !== null && got !== 'acme-42') { wrong++; console.error('  WRONG ' + name + '/' + dn); }
+    }
+  }
+  ok(wrong === 0, 'no geometry ever returns a wrong payload under damage (' + trials + ' trials)');
+
+  // Encode and decode must agree: the geometry is not signalled on the wire, so a
+  // mismatch has to fail rather than produce something plausible.
+  const em = SPAB.encode(COVER, 'acme-42', { ecc: 'rlnc', rlncGeom: 'wide' });
+  const mism = SPAB.decode(em.text, { ecc: 'rlnc', rlncGeom: 'default' });
+  ok(mism.message === null || mism.message === 'acme-42',
+    'a mismatched geometry yields nothing rather than a wrong payload');
+  // An unknown name falls back to the default rather than throwing.
+  eq(SPAB.encode(COVER, 'x', { ecc: 'rlnc', rlncGeom: 'nonsense' }).metadata.rlncPacketBits, 32,
+    'an unknown geometry name falls back to the default');
+
+  // Payloads across a range of K, so the solver is exercised beyond the trivial case.
+  for (const pl of ['x', 'acme-42', 'contract-2026-11-draft', 'a'.repeat(60)]) {
+    const p = { ecc: 'rlnc' };
+    const e = SPAB.encode(COVER.repeat(2), pl, p);
+    eq(SPAB.decode(e.text, p).message, pl, 'a ' + pl.length + '-char payload round-trips (K=' + e.metadata.rlncK + ')');
+  }
+  // Cross-carrier pooling: every enabled class emits disjoint esi ranges.
+  const multi = SPAB.encode(COVER, 'acme-42', { ecc: 'rlnc', classes: ['ws', 'apos', 'hyphen'] });
+  eq(SPAB.decode(multi.text, { ecc: 'rlnc', classes: ['ws', 'apos', 'hyphen'] }).message, 'acme-42',
+    'packets pool across carrier classes');
+})();
+
+// ============================================================ 12c. the soft layer
+console.log('\n-- 12c. sliding histogram detector and the soft layer --');
+
+(function () {
+  const prose = ('Every document carries more than its words. The spacing between them, the shape ' +
+    'of a quote, the kind of dash - these are choices a reader never notices. ').repeat(6);
+
+  // Channel estimation from the carrier histogram alone. An unmarked passage is all
+  // default glyphs, so it looks fully collapsed; marking spreads the mass; NFKC
+  // folds it all back and the estimate returns to where it started.
+  const clean = SPAB.detect(prose, { classes: ['ws'] }).ws;
+  const marked = SPAB.detect(SPAB.encode(prose, 'acme-42', { classes: ['ws'] }).text, { classes: ['ws'] }).ws;
+  const flat = SPAB.detect(SPAB.encode(prose, 'acme-42', { classes: ['ws'] }).text.normalize('NFKC'), { classes: ['ws'] }).ws;
+  ok(clean.collapse > 0.9, 'unmarked prose estimates as fully collapsed (' + clean.collapse + ')');
+  ok(marked.collapse < clean.collapse - 0.3, 'marking lowers the collapse estimate (' + marked.collapse + ')');
+  ok(flat.collapse > 0.9, 'NFKC returns the estimate to unmarked (' + flat.collapse + ')');
+  ok(marked.meanConfidence > clean.meanConfidence,
+    'a marked passage reads with higher mean site confidence (' + marked.meanConfidence + ' vs ' + clean.meanConfidence + ')');
+
+  // The likelihood field is a field: one entry per window position.
+  eq(marked.field.length, marked.sites - marked.window + 1, 'the field has one entry per window position');
+  ok(marked.field.every(f => f.counts.reduce((a, b) => a + b, 0) === marked.window),
+    'every window histogram sums to the window size');
+  ok(marked.field.some(f => f.marked > 0.5) && clean.field.every(f => f.marked < 0.2),
+    'the marked score separates a marked passage from an unmarked one');
+  // Explicit window size, and a window larger than the site count.
+  eq(SPAB.detect(prose, { classes: ['ws'], window: 8 }).ws.window, 8, 'the window size is caller-settable');
+  eq(SPAB.detect('a b', { classes: ['ws'], window: 500 }).ws.field.length, 0,
+    'a window wider than the document yields an empty field rather than throwing');
+  ok(SPAB.detect(prose).ws !== undefined, 'detect() with no params uses the default carriers');
+  eq(SPAB.detect('').ws.sites, 0, 'detect() on empty text reports no sites');
+
+  // Posteriors: a non-default observation is near-certain; the default is ambiguous
+  // in proportion to how much collapse the histogram implies.
+  const p1 = SPAB.soft.softDigit(2, 4, 0.5);
+  ok(p1[2] > 0.9, 'a non-default observation is read with high confidence');
+  const p0lo = SPAB.soft.softDigit(0, 4, 0.0), p0hi = SPAB.soft.softDigit(0, 4, 1.0);
+  eq(p0lo[0], 1, 'with no collapse, the default glyph is certain');
+  ok(Math.abs(p0hi[0] - 0.25) < 1e-9, 'with total collapse, the default glyph is uninformative');
+  ok(p0hi[0] < p0lo[0], 'more estimated collapse means less trust in a default glyph');
+  eq(SPAB.soft.estimateCollapse([], 4), 0, 'an empty stream estimates no collapse');
+  eq(SPAB.soft.estimateCollapse([0, 1, 2, 3], 4), 0, 'a uniform stream estimates no collapse');
+  ok(SPAB.soft.estimateCollapse([0, 0, 0, 0], 4) > 0.9, 'an all-default stream estimates near-total collapse');
+  eq(SPAB.soft.siteConfidence([0.1, 0.7, 0.1, 0.1]), 0.7, 'site confidence is the posterior maximum');
+  // A window of 0 means "choose one": the field falls back to min(32, sites).
+  eq(SPAB.soft.likelihoodField('a b', 'ws', 0).window, 1, 'a zero window falls back to the site count');
+  eq(SPAB.soft.likelihoodField('', 'ws', 4).field.length, 0, 'no sites yields an empty field');
+  eq(SPAB.soft.likelihoodField('a b', 'ws', 9).field.length, 0, 'a window wider than the sites yields an empty field');
+})();
+
+// Emoji joiners are not payload. U+200D is both a zwsp carrier variant and the emoji
+// ZWJ, and reading a cover's own joiners as data desynchronises everything after
+// them — caught by the emoji document in tests/corpus.js.
+(function () {
+  const ZWJ = '\u200D';
+  const family = '\u{1F468}' + ZWJ + '\u{1F469}' + ZWJ + '\u{1F467}';
+  eq(SPAB.CLASS_DEFS.zwsp.extract('a ' + family + ' b'), [], 'an emoji ZWJ sequence yields no carrier digits');
+  eq(SPAB.CLASS_DEFS.zwsp.extract('a' + ZWJ + 'b'), [2], 'a ZWJ between ordinary letters IS carrier data');
+  // Every pictographic category the joiner test recognises.
+  const CATS = [
+    ['emoji block', '\u{1F600}'],
+    ['dingbat', '\u2714'],
+    ['regional indicator', '\u{1F1EC}'],
+    ['tag character', '\u{E0067}'],
+    ['variation selector', '\uFE0F']
+  ];
+  for (const [name, ch] of CATS) {
+    eq(SPAB.CLASS_DEFS.zwsp.extract(ch + ZWJ + ch), [], 'a joiner between ' + name + ' pairs is not payload');
+  }
+  // A joiner at the very start or end has no neighbour on one side, so it is data.
+  eq(SPAB.CLASS_DEFS.zwsp.extract(ZWJ + '\u{1F600}'), [2], 'a leading joiner has no left neighbour and is payload');
+  eq(SPAB.CLASS_DEFS.zwsp.extract('\u{1F600}' + ZWJ), [2], 'a trailing joiner has no right neighbour and is payload');
+  // The other three zero-width variants are always payload — none is an emoji joiner.
+  eq(SPAB.CLASS_DEFS.zwsp.extract('\u{1F600}\u200B\u{1F600}'), [0], 'U+200B between emoji is still payload');
+  // And the round trip survives an emoji-heavy cover.
+  const cover = ('A release note with a rocket \u{1F680} and a family ' + family +
+    ' and a flag \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F} in the middle of it. ').repeat(6);
+  const e = SPAB.encode(cover, 'emoji-safe', { classes: ['zwsp'] });
+  eq(SPAB.decode(e.text, { classes: ['zwsp'] }).message, 'emoji-safe', 'an emoji-heavy cover round-trips through zwsp');
+  ok(e.text.indexOf(family) >= 0, 'and the emoji clusters are left intact');
+})();
+
 // ============================================================ 13. the spec matches
 console.log('\n-- 13. the specification matches the implementation --');
+
+// The source header is normative documentation for anyone porting spab, and it went
+// stale once already: through 0.5.0 it still described the 0.1.x codec — "magic
+// 0xA5", a one-byte length, whitespace-only defaults — none of which had been true
+// for two wire formats. A porting agent reading it would have faithfully implemented
+// the wrong thing. So the header is checked against the descriptor here rather than
+// trusted. (Review dev/spab_0.5_review.md 12.7.)
+(function () {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'spab.js'), 'utf8');
+  const header = src.slice(0, src.indexOf('(function (root) {'));
+  const f = SPAB.algorithm.frame;
+  ok(header.indexOf('wire format v2') > 0 || header.indexOf('Wire format v2') > 0,
+    'the source header names the current wire format');
+  ok(header.indexOf('magic') < 0 || header.indexOf('no magic number') > 0,
+    'the source header does not claim a magic byte the format no longer has');
+  ok(header.indexOf('0xA5') < 0, 'the retired magic constant is gone from the header');
+  ok(header.indexOf('whitespace-only') < 0, 'the header does not claim the old whitespace-only default');
+  for (const cls of SPAB.version().defaultCarriers) {
+    ok(header.indexOf(cls) > 0, 'the header names default carrier ' + cls);
+  }
+  for (const ecc of SPAB.version().ecc) {
+    ok(header.toLowerCase().indexOf(ecc) > 0, 'the header names ecc mode ' + ecc);
+  }
+  ok(header.indexOf('17-bit') > 0, 'the header states the fixed header width the descriptor does');
+  ok(header.indexOf('nonce') > 0, 'the header states the determinism exception for encryption');
+  ok(header.indexOf('dev/wire-format.md') > 0, 'the header points at the normative spec');
+  eq(f.version, 2, 'and the descriptor agrees');
+})();
+
+// The glossary is normative vocabulary, and the previous one rotted: it described a
+// frame retired two formats earlier, called the type field "2-3 bits" when it is 5,
+// and named Reed-Solomon as the baseline code when the codec uses RLNC. Nothing
+// caught it because nothing checked it. These assert the claims that CAN be checked.
+(function () {
+  const G = fs.readFileSync(path.join(__dirname, '..', 'docs', 'glossary.md'), 'utf8');
+
+  // Every status the codec ranks must appear in the status table, and no status the
+  // glossary invents may be absent from the codec — the old one listed `tampered`,
+  // which has never existed.
+  const ranked = Object.keys(SPAB.algorithm.statusRank);
+  for (const st of ranked) {
+    ok(G.indexOf('`' + st + '`') > 0, 'the glossary documents status ' + st);
+  }
+  const claimed = [...new Set([...G.matchAll(/^\| `([a-z-]+)` \|/gm)].map(m => m[1]))];
+  const invented = claimed.filter(c => ranked.indexOf(c) < 0);
+  eq(invented, [], 'the glossary invents no status the codec does not emit');
+
+  // Payload types.
+  for (const t of Object.keys(SPAB.TYPES)) {
+    if (t === 'extended') continue;
+    ok(G.indexOf('`' + t + '`') > 0, 'the glossary documents payload type ' + t);
+  }
+  // Carrier classes and their radices.
+  for (const id of Object.keys(SPAB.CLASS_DEFS)) {
+    ok(G.indexOf('`' + id + '`') > 0, 'the glossary documents carrier class ' + id);
+  }
+  ok(G.indexOf('`ws` = 4') > 0 && G.indexOf('`wsdense` = 8') > 0,
+    'the glossary states the radices the carriers actually have');
+
+  // Field widths, stated as numbers the descriptor can confirm.
+  ok(G.indexOf('**5-bit**') > 0, 'the glossary states the type field width');
+  ok(G.indexOf('17-bit fixed header') > 0 || G.indexOf('17 bits') > 0,
+    'the glossary states the fixed header width');
+  eq(SPAB.algorithm.frame.fixedHeaderBits, 17, 'and the descriptor agrees');
+  // Checksum exponent mapping.
+  ok(/0 . 8, 1 . 16, 2 . 32/.test(G) || G.indexOf('8 << n') > 0,
+    'the glossary states the checksum exponent rule');
+  eq(W.cksumBits(0), 8, 'exponent 0 really is 8 bits');
+  eq(W.cksumBits(5), 256, 'exponent 5 really is 256 bits');
+
+  // Claims the retired glossary got wrong, asserted so they cannot come back.
+  ok(G.indexOf('no magic number') > 0, 'the glossary says there is no magic number');
+  ok(G.indexOf('0xA5') < 0, 'the retired magic constant is absent from the glossary');
+  ok(G.indexOf('Reed') < 0 && G.indexOf('Reed-Solomon') < 0,
+    'the glossary does not name a code the codec never used');
+  ok(G.indexOf('`tampered`') < 0, 'the glossary does not document a status that never existed');
+  ok(G.indexOf('0.5.1') > 0 || G.indexOf(SPAB.VERSION) > 0, 'the glossary is version-stamped');
+})();
+
+// A version printed in a README goes stale the moment the version moves, and nobody
+// notices because nothing reads it. This does.
+(function () {
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'README.md'), 'utf8');
+  const shown = /version: '([\d.]+)'/.exec(readme);
+  ok(!!shown, 'the README shows a version() example');
+  eq(shown[1], SPAB.VERSION, 'the version in the README example matches the library');
+  eq(require('../src/js/package.json').version, SPAB.VERSION, 'and so does package.json');
+  // Every status the decoder can return must be listed for the caller.
+  for (const st of Object.keys(SPAB.algorithm.statusRank)) {
+    ok(readme.indexOf('`' + st + '`') > 0, 'the README documents status ' + st);
+  }
+})();
 
 const SPEC = fs.readFileSync(path.join(__dirname, '..', 'dev', 'wire-format.md'), 'utf8');
 ok(/version\s*:\s*3/.test(SPEC) && /type\s*:\s*5/.test(SPEC) && /comp\s*:\s*3/.test(SPEC) &&

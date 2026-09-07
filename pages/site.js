@@ -57,6 +57,7 @@
       { path: '/',          text: 'Home' },
       { path: '/how',       text: 'How it works' },
       { path: '/test',      text: 'Playground' },
+      { path: '/robustness', text: 'Robustness' },
       { path: '/libraries', text: 'Libraries' }
     ],
 
