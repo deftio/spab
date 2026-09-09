@@ -127,7 +127,7 @@ Deferred (the user flagged "more on that later"); captured here so the channel m
 
 ## Variable bits per symbol
 
-Not every slot has to carry the same number of bits. Where the text is long and a slot's symbol class supports many safe variants, that slot can carry more bits (a higher-radix symbol); where only a plain space fits, it carries fewer. The bit allocation is deterministic given the passage + params, so encode and decode agree on the per-slot capacity map.
+Not every slot has to carry the same number of bits. Where the text is long and a slot's symbol class supports many safe variants, that slot can carry more bits (a higher-alphabet symbol); where only a plain space fits, it carries fewer. The bit allocation is deterministic given the passage + params, so encode and decode agree on the per-slot capacity map.
 
 This variable-rate stream is what feeds ECC: more total information slots means the ECC layer has more room for parity/redundancy, or a larger payload, at the encoder's choice. (Analogy: adaptive-rate modulation over a channel whose per-symbol capacity varies with what glyphs the text makes available.)
 
@@ -512,7 +512,7 @@ Phased so the **benchmark harness exists early** and every later idea is measure
 7. **Block-histogram coding + A/B framing** — the exploratory core; measure real per-block capacity and framing robustness in the harness.
 8. **ECC Stack A** — markers/A-B sync + soft inner + fountain outer, behind the ECC interface.
 9. **ECC Stack B** — marker/watermark (Davey–MacKay-style) sync code, same interface; benchmark A vs. B head-to-head.
-10. **Variable-rate bit codec** — deterministic per-slot capacity map; variable-radix pack/unpack; measure the capacity gain vs. desync risk.
+10. **Variable-rate bit codec** — deterministic per-slot capacity map; variable-alphabet pack/unpack; measure the capacity gain vs. desync risk.
 11. **Packaging** — self-contained ES module with `encode` / `decode` exports; Node + browser; harness runnable in CI.
 12. **(v2+) Executable payload** — mini-language spec + opt-in sandboxed runner.
 

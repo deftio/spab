@@ -301,7 +301,7 @@ diagnosing a failed decode wants to see *where* the text stopped looking marked,
 which a boolean cannot say.
 
 The channel estimate needs no pilot symbols because the carrier histogram is the
-pilot: an intact marked stream is near-uniform over the radix, so excess mass on the
+pilot: an intact marked stream is near-uniform over the alphabet, so excess mass on the
 plain space measures how much normalization the text has been through. Unmarked prose
 estimates ~0.99, a freshly marked passage ~0.41, and the same passage after NFKC
 returns to ~0.99.

@@ -218,9 +218,9 @@ VSRMark is exceptionally strong here because one variation selector can encode a
 
 spab also contains intentionally dense modes. The shipping JS supports:
 
-- `ws`: radix 4, 2 bits per eligible inter-word space;
-- `wsdense`: radix 8, 3 bits per eligible inter-word space;
-- `zwsp`: radix 4, 2 bits per inserted zero-width character;
+- `ws`: alphabet 4, 2 bits per eligible inter-word space;
+- `wsdense`: alphabet 8, 3 bits per eligible inter-word space;
+- `zwsp`: alphabet 4, 2 bits per inserted zero-width character;
 - a default zero-width density of 6 inserted characters per word gap, or 12 raw bits/gap;
 - automatic zero-width density growth up to 64 characters per gap.
 
@@ -1091,7 +1091,7 @@ They are worth recording precisely so future ports do not accidentally make them
 
 ## 12.1 The shipping decoder is still a hard per-glyph modem
 
-The biggest architectural gap is that the current JavaScript source reads each carrier position as an exact radix digit:
+The biggest architectural gap is that the current JavaScript source reads each carrier position as an exact alphabet digit:
 
 ```text
 carrier glyph

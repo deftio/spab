@@ -216,7 +216,9 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
   } finally { global.TextEncoder = TE; global.TextDecoder = TD; }
 })();
 
-// -- symbol modem: mixed-radix bits<->symbols round-trip, incl. non-power-of-2 radices --
+// -- symbol modem: mixed-radix bits<->symbols round-trip, incl. non-power-of-2 alphabets --
+// (The packer's inputs are radices by definition; what varies here is the ALPHABET SIZE
+//  a carrier offers. See docs/glossary.md for the distinction.)
 (function () {
   const sym = SPAB.symbols;
   function rt(radices) {
@@ -228,13 +230,13 @@ ok(encLow.metadata.issues.some(function (s) { return /low redundancy/i.test(s); 
     return inRange && back.length === bits.length && back.join('') === bits.join('');
   }
   ok(rt([4, 4, 4, 4, 4]), 'symbol modem round-trips power-of-2 radices');
-  ok(rt([3, 3, 3, 3, 3, 3, 3, 3]), 'symbol modem round-trips radix-3 (non-power-of-2)');
+  ok(rt([3, 3, 3, 3, 3, 3, 3, 3]), 'symbol modem round-trips an alphabet of 3 (non-power-of-2)');
   ok(rt([6, 5, 4, 3, 7, 2, 6, 5, 3]), 'symbol modem round-trips mixed non-power-of-2 radices');
-  // capacity recovers fractional bits: radix-3 beats the naive floor(log2)=1 bit/site
+  // capacity recovers fractional bits: an alphabet of 3 beats the naive floor(log2)=1 bit/site
   const capN = sym.capacity([3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
-  ok(capN > 10, 'radix-3 capacity (' + capN + ' bits / 10 sites) exceeds naive 1 bit/site');
-  // long radix-3 stream still bounded/valid (blocking)
-  ok(rt(new Array(200).fill(3)), 'symbol modem round-trips a long radix-3 stream (blocked)');
+  ok(capN > 10, 'alphabet-3 capacity (' + capN + ' bits / 10 sites) exceeds naive 1 bit/site');
+  // long alphabet-3 stream still bounded/valid (blocking)
+  ok(rt(new Array(200).fill(3)), 'symbol modem round-trips a long alphabet-3 stream (blocked)');
 })();
 
 // -- keyed scramble (interleave + whitening): right key recovers, wrong/no key fail --

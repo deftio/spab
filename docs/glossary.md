@@ -55,8 +55,20 @@ is what "length-preserving" means below.
 - **Site** — a position where a carrier can be read or written. For `ws`, an
   inter-word gap; for `apos`, an apostrophe.
 - **Variant** — one of the interchangeable glyphs a site can take.
-- **Radix** — how many variants a class has, hence bits per site: `ws` = 4 (2 bits),
-  `wsdense` = 8 (3 bits), `apos`/`hyphen` = 2 (1 bit).
+- **Alphabet** — the set of interchangeable variants a carrier class offers at one
+  site, and (loosely) its size. `ws` = 4, `wsdense` = 8, `apos`/`hyphen` = 2,
+  `zwsp` = 4. This is a **channel** property: it is a fact about what the text can
+  be made to hold. **An alphabet has no obligation to be a power of two** — 6 or 10
+  is perfectly well defined, and the packer handles it at 97–100% efficiency. The
+  shipping alphabets happen to be powers of two, which is a choice, not a law.
+- **Radix** — the same integer, in the one context where it is acting as the base of
+  a positional numeral system: the input to the mixed-radix packer. This is a
+  **coding** property. The rule in this codebase: a carrier has an *alphabet*; the
+  packer has *radices*. Do not use "radix" for the channel — that phrasing quietly
+  implies powers of two are privileged, which is how the wider alphabets in
+  `r_and_d/docs/symbol-catalog.md` went unused. (Note also that in fixed-point DSP,
+  e.g. `fr_math`, "radix" means a power-of-two binary scale — a further reason to
+  keep the word confined to the packer.)
 - **Substitution vs insert** — a substitution carrier swaps an existing character, so
   the text stays exactly as long. An insert carrier (`zwsp`) *adds* zero-width
   characters: far more capacity, but the document grows in bytes and the mark is
@@ -148,10 +160,22 @@ Applied in this order, and undone in reverse:
   of 32 offsets, so a shift becomes "try phase *p*".
 - **Scan-anywhere** — packets are self-contained and checksummed, so one intact copy
   can be found at any offset without agreement from its neighbours.
-- **Mixed-radix block** — bits are packed across sites of differing radix in bounded
-  blocks, recovering the fractional bits of a non-power-of-two radix. Consequence
-  worth knowing: **every site in a block affects every bit of that block**, so one
-  damaged carrier costs up to 32 bits. Not the same "block" as below.
+- **Mixed-radix block** — bits are packed across sites of differing alphabet size in
+  bounded blocks, recovering the fractional bits of a non-power-of-two alphabet.
+  How far one damaged site propagates **depends entirely on the alphabet**, measured:
+
+  | alphabet | block | mean bit flips from one damaged site | max |
+  |---|---|---|---|
+  | 4 | 16 sites / 32 bits | 1.69 | 2 |
+  | 6 | 12 sites / 31 bits | 6.17 | 10 |
+  | 8 | 10 sites / 30 bits | 2.00 | 3 |
+  | 10 | 9 sites / 29 bits | 6.78 | 13 |
+
+  Power-of-two alphabets do **not** mix: `4^16 = 2^32` exactly, so digit *s* is
+  simply bits *2s, 2s+1* and damage stays local. Only non-power-of-two alphabets
+  genuinely couple the sites. (An earlier version of this entry claimed every site
+  affects every bit of its block; that is false for the alphabets that ship.)
+  Not the same "block" as below.
 
 ## The soft layer
 
@@ -160,7 +184,7 @@ Applied in this order, and undone in reverse:
   encoded stream produces. A field over position, not a verdict.
 - **Collapse estimate** — how much of the carrier alphabet has been folded back to its
   default glyph, measured from the histogram alone. **The carrier histogram is the
-  pilot**: an intact marked stream is near-uniform over the radix, so excess mass on
+  pilot**: an intact marked stream is near-uniform over the alphabet, so excess mass on
   the plain space measures normalisation the text has been through. Unmarked prose
   estimates ~0.99, a freshly marked passage ~0.41, and the same passage after NFKC
   returns to ~0.99.
