@@ -164,7 +164,7 @@ things that confirm the roadmap, and places we deliberately differ.
 
 **Adopt — real wins we don't yet have:**
 
-- **Base-N (non-power-of-2) carrier packing.** 330k encodes bytes into an arbitrary-radix alphabet
+- **Base-N (non-power-of-2) carrier packing.** 330k encodes bytes into an arbitrary-alphabet alphabet
   by base conversion, so a 6-symbol zero-width set carries `log2(6) ≈ 2.58` bits/char, not 2. spab
   currently packs a whole number of bits per site (power-of-2 alphabets), which *wastes capacity*
   whenever a carrier has a non-power-of-2 number of glyphs. An arithmetic/base-N packer over the

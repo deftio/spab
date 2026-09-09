@@ -96,7 +96,7 @@ modem beside the existing one.
 
 **Naming hazard for whoever picks this up.** The descriptor already says
 `blocks: true` and `symbolLayer: 'mixed-radix (blocked)'`, and those are a *different*
-mechanism: `symBlocks()` groups sites so bits pack across non-power-of-two radices
+mechanism: `symBlocks()` groups sites so bits pack across non-power-of-two alphabets
 under a 2^32 product cap, bounding how far one damaged symbol propagates. It is not
 histogram integration. Two meanings of "block" in one file. The only field that
 honestly reports the gap is `softDecision: false`.
@@ -180,7 +180,7 @@ difference.
 layer was used to down-weight blocks holding more ambiguous default glyphs in the
 majority vote. It never helped and twice hurt — scattered folding at 5% went 56% ->
 50%, at 20% went 6% -> 0%. The weight cannot distinguish a DAMAGED default glyph
-from a legitimately sent one, since about 1/radix of sites carry the default value
+from a legitimately sent one, since about 1/alphabet of sites carry the default value
 in an intact stream, so it penalises good blocks for their content. The information
 is not there at the site level. It may be there at the *window* level, which is what
 the sliding detector is for.
@@ -249,10 +249,20 @@ fountain decoder weigh the two channels differently.
 
 ### Block size is a robustness knob nobody is turning — **open**
 
-Mixed-radix conversion mixes every site in a block into every bit of that block, so
-one folded carrier corrupts up to 32 bits. That makes PARTIAL normalization — a tool
-that flattens some whitespace variants but not all — far more destructive than its
-rate suggests. `params.block` already caps block size in sites, and it matters:
+**The mechanism stated here was wrong; the measurements below are not.** This entry
+used to claim mixed-radix conversion mixes every site in a block into every bit, so
+one folded carrier corrupts up to 32 bits. Measured, that is false for every
+alphabet spab ships: they are all powers of two, `4^16 = 2^32` exactly, and damage
+stays local at **1.5 mean bit flips per damaged site — identical at `block=0` and
+`block=4`.** Only non-power-of-two alphabets genuinely mix (alphabet 6: 6.17 mean,
+max 10). See `docs/encoding-walkthrough.md` §4.
+
+What `params.block` actually changes is the **bit-to-site permutation**: digits are
+emitted low-first within a block, so block length decides which bits land on which
+site. It is an interleaver, not an avalanche control. That still matters against
+PARTIAL normalization — a tool that flattens some whitespace variants but not all —
+because it changes how burst damage distributes across packet bits, and the effect
+is large:
 
 | variants folded | default | block=2 | block=3 | block=4 | block=6 |
 |--:|--:|--:|--:|--:|--:|

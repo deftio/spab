@@ -2,14 +2,14 @@
 /*
  * basen.js — mixed-radix (base-N) carrier packing prototype.  [R&D / not shipped]
  *
- * Lesson from 330k's unicode_steganography.js: encoding into an arbitrary-radix
+ * Lesson from 330k's unicode_steganography.js: encoding into an arbitrary-alphabet
  * alphabet (base conversion) captures the FRACTIONAL bits that a power-of-two,
- * per-site packer throws away. Today spab consumes floor(log2(radix)) bits at each
+ * per-site packer throws away. Today spab consumes floor(log2(alphabet)) bits at each
  * carrier site, so any carrier whose alphabet size isn't a power of two wastes
  * capacity — e.g. a 6-symbol zero-width set holds log2(6)=2.585 bits/char, not 2.
  *
  * This prototype implements a zero-dependency MIXED-radix packer: the whole payload
- * is one big integer, and the heterogeneous carrier sites (each with its own radix
+ * is one big integer, and the heterogeneous carrier sites (each with its own alphabet
  * r_i) are its digits. Capacity is log2(prod r_i) = sum log2(r_i) — the fractional
  * bits at every site are recovered. It round-trips and reports the gain vs. the naive
  * per-site floor. If it pays off, it graduates from here into the codec.
@@ -47,13 +47,13 @@ function mulAddSmall(bytes, mul, add) {
 function isZero(bytes) { for (var i = 0; i < bytes.length; i++) if (bytes[i] !== 0) return false; return true; }
 
 // ---------- mixed-radix pack / unpack ----------
-// radices[i] is the alphabet size of carrier site i (site 0 = least significant digit).
-// Returns digits[i] in 0..radices[i]-1. Requires prod(radices) >= value (capacity).
-function pack(bytes, radices) {
+// alphabets[i] is the alphabet size of carrier site i (site 0 = least significant digit).
+// Returns digits[i] in 0..alphabets[i]-1. Requires prod(alphabets) >= value (capacity).
+function pack(bytes, alphabets) {
   var n = bytes.slice();
-  var digits = new Array(radices.length);
-  for (var i = 0; i < radices.length; i++) {
-    var dm = divmodSmall(n, radices[i]);
+  var digits = new Array(alphabets.length);
+  for (var i = 0; i < alphabets.length; i++) {
+    var dm = divmodSmall(n, alphabets[i]);
     digits[i] = dm.r;
     n = dm.q;
   }
@@ -61,36 +61,36 @@ function pack(bytes, radices) {
   return digits;
 }
 // Inverse: reconstruct the byte array (left-padded to byteLen) from the digits.
-function unpack(digits, radices, byteLen) {
+function unpack(digits, alphabets, byteLen) {
   var n = [0];
-  for (var i = radices.length - 1; i >= 0; i--) n = mulAddSmall(n, radices[i], digits[i]);
+  for (var i = alphabets.length - 1; i >= 0; i--) n = mulAddSmall(n, alphabets[i], digits[i]);
   while (n.length < byteLen) n.unshift(0);
   return n.slice(n.length - byteLen);
 }
 
 // ---------- capacity accounting ----------
 function log2(x) { return Math.log(x) / Math.LN2; }
-function naiveBits(radices) { return radices.reduce(function (s, r) { return s + Math.floor(log2(r)); }, 0); }
-function mixedBits(radices) { return radices.reduce(function (s, r) { return s + log2(r); }, 0); }
+function naiveBits(alphabets) { return alphabets.reduce(function (s, r) { return s + Math.floor(log2(r)); }, 0); }
+function mixedBits(alphabets) { return alphabets.reduce(function (s, r) { return s + log2(r); }, 0); }
 
 module.exports = { pack: pack, unpack: unpack, naiveBits: naiveBits, mixedBits: mixedBits };
 
 // ---------- demo / self-check ----------
 if (require.main === module) {
-  // 1) round-trip self-check over random payloads and random heterogeneous radices.
+  // 1) round-trip self-check over random payloads and random heterogeneous alphabets.
   function rint(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
   var ALPHABETS = [2, 3, 4, 5, 6, 7, 8, 10, 16];
   var fails = 0, trials = 4000;
   for (var t = 0; t < trials; t++) {
     var nSites = rint(40, 200);
-    var radices = []; for (var s = 0; s < nSites; s++) radices.push(ALPHABETS[rint(0, ALPHABETS.length - 1)]);
-    var capBits = Math.floor(mixedBits(radices));
+    var alphabets = []; for (var s = 0; s < nSites; s++) alphabets.push(ALPHABETS[rint(0, ALPHABETS.length - 1)]);
+    var capBits = Math.floor(mixedBits(alphabets));
     var byteLen = Math.max(1, Math.floor((capBits - 8) / 8)); // leave headroom so it fits
     var bytes = []; for (var b = 0; b < byteLen; b++) bytes.push(rint(0, 255));
     if (bytes[0] === 0) bytes[0] = 1; // keep byteLen well-defined for the check
     try {
-      var digits = pack(bytes, radices);
-      var back = unpack(digits, radices, byteLen);
+      var digits = pack(bytes, alphabets);
+      var back = unpack(digits, alphabets, byteLen);
       if (back.join(',') !== bytes.join(',')) { fails++; if (fails <= 3) console.error('  mismatch @trial ' + t); }
     } catch (e) { fails++; if (fails <= 3) console.error('  ' + e.message); }
   }

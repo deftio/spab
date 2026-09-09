@@ -102,12 +102,13 @@
   var ZW_MAX_DENSITY = 64;
   var AUTO_GROW_REPS = 3;   // copies to aim for when growing a passage to fit
 
-  // Each class: radix (alphabet size = distinct symbols per site), bits (= floor(log2 radix),
-  // kept for display/back-compat), detect(text)->[indices], read(text,i)->digit(0..radix-1),
+  // Each class: alphabet (size = distinct glyphs per site), bits (= floor(log2 alphabet),
+  // kept for display; EXACT ONLY for power-of-two alphabets), detect(text)->[indices],
+  // read(text,i)->digit(0..alphabet-1),
   // glyph(digit)->char. The symbol modem (below) maps the ECC bit stream to/from these radices.
   var CLASS_DEFS = {
     ws: {
-      radix: 4, bits: 2,
+      alphabet: 4, bits: 2,
       detect: function (text) {
         var out = [];
         for (var i = 1; i < text.length - 1; i++) {
@@ -120,7 +121,7 @@
       glyph: function (v) { return SPACE_MAP[v & 3]; }
     },
     apos: {
-      radix: 2, bits: 1,
+      alphabet: 2, bits: 1,
       detect: function (text) {
         var out = [];
         for (var i = 0; i < text.length; i++) { var c = text.charCodeAt(i); if (c === 0x27 || c === 0x2019) out.push(i); }
@@ -130,7 +131,7 @@
       glyph: function (v) { return String.fromCharCode(v ? 0x2019 : 0x27); }
     },
     hyphen: {
-      radix: 2, bits: 1,
+      alphabet: 2, bits: 1,
       detect: function (text) {
         var out = [];
         for (var i = 0; i < text.length; i++) { var c = text.charCodeAt(i); if (c === 0x2D || c === 0x2010) out.push(i); }
@@ -139,9 +140,9 @@
       read: function (text, i) { return text.charCodeAt(i) === 0x2010 ? 1 : 0; },
       glyph: function (v) { return String.fromCharCode(v ? 0x2010 : 0x2D); }
     },
-    // Dense length-preserving whitespace (substitution, 8 variants / radix 8).
+    // Dense length-preserving whitespace (substitution, 8 variants / alphabet 8).
     wsdense: {
-      radix: 8, bits: 3,
+      alphabet: 8, bits: 3,
       detect: function (text) {
         var out = [];
         for (var i = 1; i < text.length - 1; i++) {
@@ -155,7 +156,7 @@
     // Dense zero-width (INSERTION, 2 bits per inserted char). kind:'ins' — encode inserts
     // a run of zero-width chars after each word gap; decode extracts every zero-width char.
     zwsp: {
-      kind: 'ins', radix: 4, bits: 2,
+      kind: 'ins', alphabet: 4, bits: 2,
       anchors: function (text) { return CLASS_DEFS.ws.detect(text); }, // insert after inter-word spaces
       // embed a flat digit stream (perGap zero-width chars per word gap).
       // `at` is the anchor set encode planned against, taken from the ORIGINAL cover.
@@ -246,8 +247,8 @@
   }
   function readClassBits(text, id, key, maxSites) {
     var def = CLASS_DEFS[id], digits = classDigits(text, id);
-    if (key) digits = descramble(digits, def.radix, keySeed(key, id)); // invert keyed scramble
-    return symbolsToBits(digits, filledRadices(digits.length, def.radix), maxSites);
+    if (key) digits = descramble(digits, def.alphabet, keySeed(key, id)); // invert keyed scramble
+    return symbolsToBits(digits, filledRadices(digits.length, def.alphabet), maxSites);
   }
 
   // ---------- resynchronisation ----------
@@ -261,14 +262,14 @@
   // Phases are tried on the RAW digit stream, and only when unkeyed: the keyed
   // scramble interleaves across the whole stream, so a shifted stream cannot be
   // descrambled and sweeping it would produce noise.
-  var MAX_PHASE = 32;   // largest block length spab produces (radix-2 packs 32 sites)
+  var MAX_PHASE = 32;   // largest block length spab produces (an alphabet of 2 packs 32 sites)
   // Keyed marks sweep phases too, now that the keyed permutation is block-local and
   // no longer a function of the carrier count.
   function phaseCount(key, n) { return Math.min(MAX_PHASE, n); }
   function phaseBits(digits, ph, def, key, id, maxSites) {
     var d = ph ? digits.slice(ph) : digits;
-    if (key) d = descramble(d, def.radix, keySeed(key, id));
-    return symbolsToBits(d, filledRadices(d.length, def.radix), maxSites);
+    if (key) d = descramble(d, def.alphabet, keySeed(key, id));
+    return symbolsToBits(d, filledRadices(d.length, def.alphabet), maxSites);
   }
 
   // ---------- GF(256) + systematic RLNC fountain (ecc:'rlnc') ----------
@@ -1175,12 +1176,19 @@
   }
 
   // ---------- symbol modem: ECC bit stream <-> carrier symbols (mixed-radix, blocked) ----------
-  // Carriers expose a radix per site (ws=4, apos/hyphen=2, wsdense=8, zwsp=4, …). To spend
-  // capacity fully — including the fractional bits of a non-power-of-two radix — bits are packed
-  // into symbols by MIXED-RADIX (base) conversion. Crucially this is done in bounded BLOCKS, not
-  // as one giant number: a damaged symbol corrupts only its block (≤ ~32 bits), preserving spab's
-  // locality so ECC can repair it. Blocks derive purely from the radix sequence, so encoder and
-  // decoder agree with no side channel. Integer-only (no log/float) for cross-port determinism.
+  // TERMINOLOGY. Two different things meet here and they have separate names:
+  //   ALPHABET — a channel property. The set of distinguishable glyphs a carrier class
+  //     offers at one site, and its size (ws=4, apos/hyphen=2, wsdense=8, zwsp=4, …).
+  //     An alphabet has no obligation to be a power of two; 6 or 10 is fine.
+  //   RADIX    — a coding property. When alphabet sizes are fed to the positional
+  //     packer below they act as the radices of a mixed-radix numeral system. That is the
+  //     only place the word belongs, and it is why `radices` stays plural here.
+  // To spend capacity fully — including the fractional bits of an alphabet that is not a
+  // power of two — bits are packed into symbols by MIXED-RADIX conversion. Crucially this
+  // is done in bounded BLOCKS, not as one giant number: a damaged symbol corrupts only its
+  // block (≤ ~32 bits), preserving spab's locality so ECC can repair it. Blocks derive
+  // purely from the alphabet sequence, so encoder and decoder agree with no side channel.
+  // Integer-only (no log/float) for cross-port determinism.
   var SYM_CAP = 0x100000000; // 2^32 — block radix-product ceiling (Number-safe; bounds avalanche)
   // Block grouping. A block is as many consecutive sites as fit under the radix-product
   // ceiling AND under an optional site-count cap `maxSites`. Block size need NOT be a power
@@ -1224,7 +1232,7 @@
 
   // ---------- keyed scramble (opt-in): interleave + whitening over the symbol stream ----------
   // With params.key set, the digit stream is (1) whitened — each digit += a key-derived PN value
-  // (mod radix), flattening carrier statistics and hiding structure — and (2) interleaved by a
+  // (mod alphabet), flattening carrier statistics and hiding structure — and (2) interleaved by a
   // key-derived permutation, spreading burst damage across mixed-radix blocks and obscuring order.
   // Both are keyed (derived from the secret), so this is cryptography-flavored, NOT hidden-constant
   // obscurity; and it is a COST MULTIPLIER, not confidentiality — that awaits the planned AEAD.
@@ -1253,7 +1261,7 @@
   // interleave on a mark that any edit destroys.
   var KEY_BLOCK = 32;   // <= MAX_PHASE, so one phase always realigns the grid
 
-  function keyStreams(n, radix, seed) {
+  function keyStreams(n, alphabet, seed) {
     var g = prng32(seed), b = Math.min(KEY_BLOCK, n), perm = new Array(b), i, j, t;
     for (i = 0; i < b; i++) perm[i] = i;
     for (i = b - 1; i > 0; i--) { j = g() % (i + 1); t = perm[i]; perm[i] = perm[j]; perm[j] = t; } // Fisher-Yates
@@ -1264,7 +1272,7 @@
     // shift mod 32, which the sweep does cover. Whitening exists for energy
     // dispersal, not secrecy, so a repeating sequence costs little here.
     var pn = new Array(b);
-    for (i = 0; i < b; i++) pn[i] = g() % radix;
+    for (i = 0; i < b; i++) pn[i] = g() % alphabet;
     return { perm: perm, pn: pn, block: b };
   }
   // Map position i to its permuted position within i's own block. A trailing
@@ -1274,14 +1282,14 @@
     var base = i - (i % ks.block);
     return (base + ks.block <= n) ? base + ks.perm[i % ks.block] : i;
   }
-  function scramble(digits, radix, seed) {
-    var n = digits.length, ks = keyStreams(n, radix, seed), out = new Array(n), i;
-    for (i = 0; i < n; i++) out[keyIndex(ks, i, n)] = (digits[i] + ks.pn[i % ks.block]) % radix; // whiten then interleave
+  function scramble(digits, alphabet, seed) {
+    var n = digits.length, ks = keyStreams(n, alphabet, seed), out = new Array(n), i;
+    for (i = 0; i < n; i++) out[keyIndex(ks, i, n)] = (digits[i] + ks.pn[i % ks.block]) % alphabet; // whiten then interleave
     return out;
   }
-  function descramble(physical, radix, seed) {
-    var n = physical.length, ks = keyStreams(n, radix, seed), out = new Array(n), i;
-    for (i = 0; i < n; i++) out[i] = ((physical[keyIndex(ks, i, n)] - ks.pn[i % ks.block]) % radix + radix) % radix;
+  function descramble(physical, alphabet, seed) {
+    var n = physical.length, ks = keyStreams(n, alphabet, seed), out = new Array(n), i;
+    for (i = 0; i < n; i++) out[i] = ((physical[keyIndex(ks, i, n)] - ks.pn[i % ks.block]) % alphabet + alphabet) % alphabet;
     return out;
   }
 
@@ -1347,7 +1355,7 @@
       ids.forEach(function (id) {
         var d = CLASS_DEFS[id];
         if (d.kind === 'ins') return;
-        subCap = Math.max(subCap, symCapacityBits(filledRadices(d.detect(cover).length, d.radix), maxSites));
+        subCap = Math.max(subCap, symCapacityBits(filledRadices(d.detect(cover).length, d.alphabet), maxSites));
       });
       // Grow only when the payload does not fit AT ALL. Length preservation is the
       // property most callers are here for, so a passage that holds even one copy
@@ -1363,7 +1371,7 @@
           // down), so ask the packer rather than assuming.
           var want = density;
           while (want < ZW_MAX_DENSITY &&
-                 symCapacityBits(filledRadices(gaps * want, CLASS_DEFS.zwsp.radix), maxSites) < needBits) want++;
+                 symCapacityBits(filledRadices(gaps * want, CLASS_DEFS.zwsp.alphabet), maxSites) < needBits) want++;
           density = want;
         }
       }
@@ -1373,7 +1381,7 @@
       var def = CLASS_DEFS[id], isIns = def.kind === 'ins';
       var idx = isIns ? def.anchors(cover) : def.detect(cover);
       var nSites = isIns ? idx.length * density : idx.length; // ins: perGap symbols per gap
-      var radices = filledRadices(nSites, def.radix);
+      var radices = filledRadices(nSites, def.alphabet);
       var cap = symCapacityBits(radices, maxSites); // usable bits after mixed-radix packing
       var bits, reps, tooShort;
 
@@ -1418,7 +1426,7 @@
       }
 
       var digits = bitsToSymbols(bits, radices, maxSites); // ECC bit stream -> carrier symbols
-      if (key) digits = scramble(digits, def.radix, keySeed(key, id)); // opt-in interleave + whitening
+      if (key) digits = scramble(digits, def.alphabet, keySeed(key, id)); // opt-in interleave + whitening
       if (isIns) {
         insPlans.push({ def: def, digits: digits, perGap: density, at: idx });
       } else {
@@ -1509,7 +1517,7 @@
     // from the soft layer (SPAB.soft) to down-weight blocks holding more ambiguous
     // default glyphs. It never helped and twice hurt: scattered folding at 5% went
     // 56% -> 50%, at 20% went 6% -> 0%. The reason is that the weight cannot tell a
-    // DAMAGED default glyph from a legitimately sent one — about 1/radix of sites
+    // DAMAGED default glyph from a legitimately sent one — about 1/alphabet of sites
     // carry the default value in an intact stream — so it penalises good blocks for
     // their content. Soft information is real and the detector exposes it, but this
     // is not where it pays. Recorded in dev/roadmap.md so it is not rebuilt.
@@ -1808,7 +1816,7 @@
   //
   // How ambiguous depends on how much collapsing happened, and that is measurable
   // from the carrier histogram itself: an intact marked stream is close to uniform
-  // over the radix, so excess mass on the default value is the signature of
+  // over the alphabet, so excess mass on the default value is the signature of
   // collapse. That is channel estimation with no pilots — the histogram IS the
   // pilot. See dev/roadmap.md.
   var SOFT_EPS = 0.02;   // residual doubt on a non-default observation
@@ -1816,40 +1824,40 @@
   // Fraction of sites that look collapsed. If a fraction f of a uniform stream is
   // folded onto value 0, then h[0] ~ n/r + n*f*(1 - 1/r), so f follows from the
   // excess. Returns 0 for an intact stream, ->1 for a fully normalized one.
-  function estimateCollapse(digits, radix) {
+  function estimateCollapse(digits, alphabet) {
     var n = digits.length;
     if (!n) return 0;
     var h0 = 0;
     for (var i = 0; i < n; i++) if (digits[i] === 0) h0++;
-    var excess = h0 - n / radix;
+    var excess = h0 - n / alphabet;
     if (excess <= 0) return 0;
-    return Math.min(0.99, excess / (n * (1 - 1 / radix)));
+    return Math.min(0.99, excess / (n * (1 - 1 / alphabet)));
   }
 
-  // P(sent = v | observed), as a vector over the radix.
-  function softDigit(observed, radix, collapse) {
-    var p = new Array(radix), v;
+  // P(sent = v | observed), as a vector over the alphabet.
+  function softDigit(observed, alphabet, collapse) {
+    var p = new Array(alphabet), v;
     if (observed !== 0) {
-      for (v = 0; v < radix; v++) p[v] = SOFT_EPS / (radix - 1);
+      for (v = 0; v < alphabet; v++) p[v] = SOFT_EPS / (alphabet - 1);
       p[observed] = 1 - SOFT_EPS;
       return p;
     }
     // The default glyph: either it was sent, or a variant collapsed onto it.
-    var sent0 = 1 / radix, collapsed = collapse / radix, tot = sent0 + (radix - 1) * collapsed;
+    var sent0 = 1 / alphabet, collapsed = collapse / alphabet, tot = sent0 + (alphabet - 1) * collapsed;
     p[0] = sent0 / tot;
-    for (v = 1; v < radix; v++) p[v] = collapsed / tot;
+    for (v = 1; v < alphabet; v++) p[v] = collapsed / tot;
     return p;
   }
 
-  // Per-site posterior over the radix, plus the channel estimate that produced it.
+  // Per-site posterior over the alphabet, plus the channel estimate that produced it.
   function classSoft(text, id) {
-    var digits = classDigits(text, id), radix = CLASS_DEFS[id].radix;
-    var collapse = estimateCollapse(digits, radix), out = new Array(digits.length);
-    for (var i = 0; i < digits.length; i++) out[i] = softDigit(digits[i], radix, collapse);
-    return { digits: digits, radix: radix, collapse: collapse, posteriors: out };
+    var digits = classDigits(text, id), alphabet = CLASS_DEFS[id].alphabet;
+    var collapse = estimateCollapse(digits, alphabet), out = new Array(digits.length);
+    for (var i = 0; i < digits.length; i++) out[i] = softDigit(digits[i], alphabet, collapse);
+    return { digits: digits, alphabet: alphabet, collapse: collapse, posteriors: out };
   }
 
-  // Confidence that a site's hard read is right — max of its posterior. 1/radix
+  // Confidence that a site's hard read is right — max of its posterior. 1/alphabet
   // means "no information", 1 means certain.
   function siteConfidence(p) {
     var m = 0;
@@ -1871,24 +1879,24 @@
   // can see the boundary. The window is advanced incrementally — one site out, one
   // site in — so the whole field costs O(sites), not O(sites x n).
   function likelihoodField(text, id, n) {
-    var d = classSoft(text, id), digits = d.digits, radix = d.radix;
+    var d = classSoft(text, id), digits = d.digits, alphabet = d.alphabet;
     n = n || Math.min(32, digits.length);
     var out = [];
-    if (!digits.length || n <= 0 || n > digits.length) return { window: n, radix: radix, collapse: d.collapse, field: out };
-    var h = new Array(radix), i, v;
-    for (v = 0; v < radix; v++) h[v] = 0;
+    if (!digits.length || n <= 0 || n > digits.length) return { window: n, alphabet: alphabet, collapse: d.collapse, field: out };
+    var h = new Array(alphabet), i, v;
+    for (v = 0; v < alphabet; v++) h[v] = 0;
     for (i = 0; i < n; i++) h[digits[i]]++;
     for (var pos = 0; pos + n <= digits.length; pos++) {
       if (pos > 0) { h[digits[pos - 1]]--; h[digits[pos + n - 1]]++; }
       // Chi-square against uniform. A marked window sits near 0; unmarked prose,
       // where every site is the default glyph, sits at its maximum.
-      var expct = n / radix, chi = 0;
-      for (v = 0; v < radix; v++) chi += (h[v] - expct) * (h[v] - expct) / expct;
-      var chiMax = n * (radix - 1);      // all mass on one value
+      var expct = n / alphabet, chi = 0;
+      for (v = 0; v < alphabet; v++) chi += (h[v] - expct) * (h[v] - expct) / expct;
+      var chiMax = n * (alphabet - 1);      // all mass on one value
       out.push({ at: pos, counts: h.slice(), chi2: +chi.toFixed(4),
         marked: +Math.max(0, 1 - chi / chiMax).toFixed(4) });
     }
-    return { window: n, radix: radix, collapse: d.collapse, field: out };
+    return { window: n, alphabet: alphabet, collapse: d.collapse, field: out };
   }
 
   // Public: the likelihood field for every enabled carrier class, plus the per-site
@@ -1905,7 +1913,7 @@
       for (var i = 0; i < soft.posteriors.length; i++) confSum += siteConfidence(soft.posteriors[i]);
       out[id] = {
         sites: soft.digits.length,
-        radix: soft.radix,
+        alphabet: soft.alphabet,
         collapse: +soft.collapse.toFixed(4),
         meanConfidence: soft.digits.length ? +(confSum / soft.digits.length).toFixed(4) : 0,
         window: lf.window,
