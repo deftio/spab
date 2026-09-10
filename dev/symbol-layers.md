@@ -1,6 +1,6 @@
 # Symbol layers: what is implemented, what was intended
 
-Status: 2026-09-07, against `src/js/spab.js` @ v0.5.1.
+Status: 2026-09-09, against `src/js/spab.js` @ v0.5.2.
 
 For a worked end-to-end example with real numbers, see
 [`docs/encoding-walkthrough.md`](../docs/encoding-walkthrough.md).

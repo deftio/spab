@@ -3,7 +3,7 @@
 The **packet** is what spab hides in text. This document specifies it completely:
 every field, every width, every escape, and the reasoning behind each choice.
 
-Status: normative for spab 0.5.0 and later (current: 0.5.1). Packets written by 0.4.x are **not** readable by
+Status: normative for spab 0.5.0 and later (current: 0.5.2). Packets written by 0.4.x are **not** readable by
 this format and vice versa — that break is the reason the version field exists, and
 the reason this is a minor bump rather than a patch.
 

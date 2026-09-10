@@ -7,8 +7,8 @@ payloads and corruption models as `r_and_d/benchmark.js`.
 
 | condition        | value                                                                                                                        |
 |------------------|------------------------------------------------------------------------------------------------------------------------------|
-| generated        | 2026-09-07                                                                                                                   |
-| spab version     | 0.5.1 (wire format v2)                                                                                                       |
+| generated        | 2026-09-10                                                                                                                   |
+| spab version     | 0.5.2 (wire format v2)                                                                                                       |
 | node             | v22.5.1                                                                                                                      |
 | platform         | darwin/arm64                                                                                                                 |
 | text samples     | 10 fixed samples from r_and_d/samples.js                                                                                     |
@@ -24,8 +24,8 @@ payloads and corruption models as `r_and_d/benchmark.js`.
 | library                  | source                           | ran     | to enable                               |
 |--------------------------|----------------------------------|---------|-----------------------------------------|
 | emoji-smuggle            | npm:emoji-smuggle-sdk@1.0.2      | yes     |                                         |
-| spab (zero-width)        | local:0.5.1 (wire v2)            | yes     |                                         |
-| spab (length-preserving) | local:0.5.1 (wire v2)            | yes     |                                         |
+| spab (zero-width)        | local:0.5.2 (wire v2)            | yes     |                                         |
+| spab (length-preserving) | local:0.5.2 (wire v2)            | yes     |                                         |
 | StegCloak (AES+HMAC)     | npm:stegcloak@1.1.1              | yes     |                                         |
 | StegCloak (plain)        | npm:stegcloak@1.1.1              | yes     |                                         |
 | @vercel/stega            | npm:@vercel/stega@1.1.0          | yes     |                                         |
@@ -56,7 +56,7 @@ damage. `-` means it declined or could not carry it.
 | spab (zero-width)        |        87% |         87% |        87% |          80% |        67% |            53% |
 | spab (length-preserving) |        70% |         67% |        53% |          43% |        27% |            13% |
 | StegCloak (AES+HMAC)     |        87% |         90% |        87% |          90% |        90% |            90% |
-| StegCloak (plain)        |        90% |         90% |        87% |          90% |        90% |            87% |
+| StegCloak (plain)        |        87% |         83% |        90% |          90% |        87% |            90% |
 | @vercel/stega            |       100% |        100% |       100% |         100% |       100% |           100% |
 | zero-width-lib           |       100% |        100% |       100% |         100% |       100% |           100% |
 
@@ -65,7 +65,7 @@ damage. `-` means it declined or could not carry it.
 Median intensity of each model, over every clean round trip. This is the
 comparison the whole folder exists for.
 
-| model         | intensity | emoji-smuggle 1.0.2 | spab (zero-width) 0.5.1 | spab (length-preserving) 0.5.1 | StegCloak (AES+HMAC) 1.1.1 | StegCloak (plain) 1.1.1 | @vercel/stega 1.1.0 | zero-width-lib 1.1.0 |
+| model         | intensity | emoji-smuggle 1.0.2 | spab (zero-width) 0.5.2 | spab (length-preserving) 0.5.2 | StegCloak (AES+HMAC) 1.1.1 | StegCloak (plain) 1.1.1 | @vercel/stega 1.1.0 | zero-width-lib 1.1.0 |
 |---------------|----------:|--------------------:|------------------------:|-------------------------------:|---------------------------:|------------------------:|--------------------:|---------------------:|
 | findReplace   |         1 |                100% |                    100% |                           100% |                       100% |                    100% |                100% |                 100% |
 | jsonTrip      |         1 |                100% |                    100% |                           100% |                       100% |                    100% |                100% |                 100% |
@@ -83,16 +83,16 @@ comparison the whole folder exists for.
 | normalize     |       0.5 |                100% |                    100% |                             2% |                       100% |                    100% |                100% |                 100% |
 | regexAttack   |      0.67 |                100% |                    100% |                             2% |                       100% |                    100% |                100% |                 100% |
 | wordInsert    |       0.1 |                 83% |                    100% |                             2% |                       100% |                    100% |                 18% |                 100% |
-| typos         |      0.15 |                 65% |                     61% |                           100% |                        91% |                     94% |                 16% |                  50% |
-| wordDelete    |       0.1 |                 73% |                     54% |                             0% |                        92% |                     93% |                 19% |                  67% |
-| truncate      |       0.5 |                  0% |                     87% |                            66% |                        51% |                     74% |                  0% |                  86% |
+| typos         |      0.15 |                 65% |                     61% |                           100% |                        90% |                     90% |                 16% |                  50% |
+| wordDelete    |       0.1 |                 73% |                     54% |                             0% |                        93% |                     91% |                 19% |                  67% |
+| truncate      |       0.5 |                  0% |                     87% |                            66% |                        58% |                     72% |                  0% |                  86% |
 | extractText   |         1 |                  0% |                    100% |                             2% |                       100% |                    100% |                  0% |                  17% |
 | reflow        |         1 |                  0% |                    100% |                             2% |                       100% |                    100% |                  0% |                  17% |
 | tokenize      |         1 |                  0% |                    100% |                             2% |                       100% |                    100% |                  0% |                  17% |
 | truncTail     |       0.5 |                 71% |                     78% |                            52% |                         0% |                      0% |                 82% |                   0% |
-| cutPaste      |       0.5 |                  0% |                     76% |                            50% |                        13% |                     26% |                  0% |                   0% |
-| zwNoise       |       0.3 |                  0% |                      0% |                           100% |                         0% |                     17% |                  0% |                   0% |
-| midExcerpt    |      0.25 |                  0% |                     57% |                            23% |                         5% |                     15% |                  0% |                   0% |
+| cutPaste      |       0.5 |                  0% |                     76% |                            50% |                        22% |                     17% |                  0% |                   0% |
+| zwNoise       |       0.3 |                  0% |                      0% |                           100% |                         0% |                     16% |                  0% |                   0% |
+| midExcerpt    |      0.25 |                  0% |                     57% |                            23% |                        12% |                     15% |                  0% |                   0% |
 | stripZw       |         1 |                  0% |                      0% |                           100% |                         0% |                      0% |                  0% |                   0% |
 | sanitisePaste |         1 |                  0% |                      0% |                             2% |                         0% |                      0% |                  0% |                   0% |
 
@@ -107,8 +107,8 @@ with no integrity check can do the second.
 | emoji-smuggle            |           0/30 |            65 | 1929 |      3046 | **1% wrong**  |
 | spab (zero-width)        |           0/30 |             9 |  813 |      3042 | **0% wrong**  |
 | spab (length-preserving) |           0/30 |            15 | 1267 |      1014 | **1% wrong**  |
-| StegCloak (AES+HMAC)     |           0/30 |           269 |  858 |      3353 | **6% wrong**  |
-| StegCloak (plain)        |           0/30 |           539 |  538 |      3403 | **12% wrong** |
+| StegCloak (AES+HMAC)     |           0/30 |           238 |  886 |      3384 | **5% wrong**  |
+| StegCloak (plain)        |           0/30 |           555 |  539 |      3414 | **12% wrong** |
 | @vercel/stega            |           0/30 |             8 | 2197 |      2835 | **0% wrong**  |
 | zero-width-lib           |           0/30 |           756 | 1043 |      3241 | **15% wrong** |
 
@@ -123,7 +123,7 @@ caller checking `if (decoded)` cannot tell the difference:
 | emoji-smuggle            | zwNoise       | "SPAB-001"                                                                            | "q�$:��\u001dH\u0010\b\u0004\u001…" |
 | spab (zero-width)        | typos         | "{\"src\":\"spab\",\"id\":4821,\"by\":\"m.chatterjee\",\"rights\":\"CC-BY\",\"v\":1}" | "d8880005-f400-0000-0000-00000000…" |
 | spab (length-preserving) | normalize     | "{\"src\":\"spab\",\"id\":4821,\"by\":\"m.chatterjee\",\"rights\":\"CC-BY\",\"v\":1}" | "�\u0000\u0000\u0001�D\u0000��a��…" |
-| StegCloak (AES+HMAC)     | sanitisePaste | "SPAB-001"                                                                            | "\u0005\u0015\u0001\u0010\u0014DP…" |
+| StegCloak (AES+HMAC)     | cutPaste      | "SPAB"                                                                                | "�\u0000\u0000\u0000\u0000\u0000\…" |
 | StegCloak (plain)        | sanitisePaste | "SPAB"                                                                                | "QA\u0005"                          |
 | @vercel/stega            | typos         | "a94a8fe5ccb19ba61c4c"                                                                | "a94a8fe5cc`�ى��Ō�c"                |
 | zero-width-lib           | sanitisePaste | "SPAB"                                                                                | "˯"                                 |
