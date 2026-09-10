@@ -7,6 +7,8 @@ the wire format is still settling, so minor versions may change it.
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-09-09
+
 Terminology only. No behaviour change: encode/decode output is byte-identical to
 0.5.1, verified by differential test across `{}`, `key`, `ecc:'rlnc'`, `wsdense`,
 `hyphen+apos` and `zwsp+autoGrow`.

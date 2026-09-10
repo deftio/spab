@@ -414,7 +414,7 @@ A decode only returns a message when the packet's checksum verifies.
 ```js
 SPAB.version()
 // {
-//   version: '0.5.1', name: '@deftio/spab', wireFormat: 2,
+//   version: '0.5.2', name: '@deftio/spab', wireFormat: 2,
 //   algorithm: 'plugsym-rep+rlnc',
 //   carriers: ['ws','apos','hyphen','wsdense','zwsp'],
 //   defaultCarriers: ['ws','apos','hyphen'],

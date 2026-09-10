@@ -21,7 +21,7 @@ numbers we have measured ourselves are in `r_and_d/reports/findings.md`, produce
 | Markov / linguistic stego | word choice | n/a — output is generated text | n/a | generates text rather than marking it | ✗ | ✗ |
 | LLM generation-time (green-list, SynthID-Text) | token sampling at generation | statistical detection, not a payload | detection score, not a CRC | no payload to carry | n/a | n/a |
 
-*Version-stamped: spab 0.5.1, wire format v2, default carriers ws+apos+hyphen. The
+*Version-stamped: spab 0.5.2, wire format v2, default carriers ws+apos+hyphen. The
 two right-hand columns were both ✗ through 0.4.x and closed in 0.5.0; a capability
 table that is not version-stamped goes stale silently, which this one did.*
 
