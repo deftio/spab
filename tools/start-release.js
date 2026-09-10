@@ -164,6 +164,30 @@ c.run('git checkout -b ' + branchName);
 c.writeVersion(next);
 c.ok('version written to all three surfaces');
 
+// Every version surface the tooling does NOT write.
+//
+// writeVersion() updates three files. The repo contains more: v0.5.2 failed at
+// the gates because src/js/README.md carries a version string inside a
+// SPAB.version() example that tests/wire.test.js asserts against, and six
+// further files (three of them
+// generated reports) still claimed 0.5.1. Catch that here, at the bump, rather
+// than after a push.
+const stale = c.findStaleVersions(current);
+if (stale.length) {
+  console.log('');
+  console.log('  ' + stale.length + ' file(s) still claim to be version ' + current + ':');
+  for (const h of stale) console.log('    ' + h.file + ':' + h.line + '  ' + h.text);
+  console.log('');
+  c.fail(
+    'Version surfaces left behind.\n' +
+    '  These are currency claims, not history — each says it describes the CURRENT\n' +
+    '  release while naming ' + current + '. Update them to ' + next + ' and re-run.\n' +
+    '  Generated reports (r_and_d/reports/*, pages/data/*) are refreshed with:\n' +
+    '    npm run benchmark && npm run capacity && npm run comparisons'
+  );
+}
+c.ok('no file still claims to be ' + current);
+
 c.promoteUnreleased(next, dateStr);
 c.ok('CHANGELOG [Unreleased] promoted to [' + next + '] — ' + dateStr);
 

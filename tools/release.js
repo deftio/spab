@@ -113,6 +113,29 @@ c.step('2. Preflight');
 if (DRY_RUN) console.log('  *** DRY RUN — every gate runs, nothing is pushed ***');
 
 var branch = c.currentBranch();
+
+// A branch that has ALREADY been merged cannot be reused.
+//
+// This repo is squash-only, so a merged branch's commits are never ancestors of
+// main. Commit to it again and the next PR proposes re-applying merged history,
+// which conflicts against everything it touched. PR #17 and PR #19 both stalled
+// here, and each cost more time than the work it carried. One API call.
+if (branch !== 'main' && branch !== 'master') {
+  const priorPr = c.mergedPrForBranch(branch);
+  if (priorPr) {
+    c.fail(
+      'Branch "' + branch + '" was already merged by PR #' + priorPr.number + '.\n' +
+      '  Squash-merge means its commits are not ancestors of main, so a new PR from\n' +
+      '  this branch re-applies merged history and conflicts.\n\n' +
+      '  Start fresh:      git checkout main && git pull && git checkout -b <new-branch>\n' +
+      '  Or rebuild this one onto main, keeping the working tree:\n' +
+      '      git reset --soft origin/main && git add -A && git commit\n' +
+      '      git push --force-with-lease\n' +
+      '  Recovery ref before rewriting: ' + (c.tryQuiet('git rev-parse --short HEAD') || 'HEAD')
+    );
+  }
+}
+
 if (branch === 'main' || branch === 'master') {
   // Committing on main is an easy mistake and, with branch protection on, a dead
   // end: the push is rejected and the work sits there with nothing obvious to do
@@ -357,6 +380,27 @@ if (!NO_AUTO) {
   try {
     c.run('gh pr merge --squash --auto');
     c.ok('auto-merge armed — lands when CI is green');
+
+    // Arming auto-merge proves nothing. GitHub accepts the request on a PR that
+    // can never merge and then waits forever, raising no error — so this script
+    // used to exit 0 with every gate green and the PR permanently stuck. Same
+    // shape as the STATUS_RANK bug in the codec: a success path that never
+    // checked the thing that actually determines the outcome. So check it.
+    const num = c.tryQuiet('gh pr view --json number --jq .number');
+    const state = c.waitForMergeState(num, 60000);
+    if (state.indexOf('UNKNOWN') === 0) {
+      console.log('\n  ! GitHub has not computed mergeability yet. Auto-merge is armed,');
+      console.log('    but this run could NOT confirm the PR can actually merge.');
+      console.log('    Check it: gh pr view ' + num + ' --json mergeable,mergeStateStatus');
+    } else if (state.indexOf('CONFLICTING') === 0) {
+      c.fail(
+        'PR #' + num + ' is ' + state + ' — auto-merge is armed but can NEVER fire.\n' +
+        '  main has moved since this branch left it. Rebuild onto main:\n' +
+        '      git reset --soft origin/main && git add -A && git commit\n' +
+        '      git push --force-with-lease'
+      );
+    }
+    else c.ok('PR is mergeable (' + state + ')');
   } catch (e) {
     console.log('\n  ! Could not enable auto-merge. The PR is open and CI is running;');
     console.log('    merge it by hand once green, or enable auto-merge in repo settings.');
