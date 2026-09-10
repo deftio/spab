@@ -231,6 +231,29 @@ const STALE_VERSION_ALLOW = [
 ];
 const TEXT_FILE = /\.(js|mjs|cjs|md|json|html|css|ya?ml|txt|toml)$/;
 
+// Two different kinds of stale, with two different consequences.
+//
+// RELEASE-CRITICAL surfaces are part of the shipped software and CI asserts
+// against them -- src/js/README.md's version example is the one that failed the
+// 0.5.2 gates. A release cannot proceed with these wrong.
+//
+// RESEARCH ARTIFACTS are benchmark output: they exist to measure spab during
+// development, not to gate a release. Regenerating them costs ~15 minutes and
+// they carry no CI assertion, so a stale report must never block shipping. The
+// caller is offered the choice instead.
+const RESEARCH_ARTIFACT = [/^r_and_d\/reports\//, /^pages\/data\//];
+
+function isResearchArtifact(rel) {
+  return RESEARCH_ARTIFACT.some(function (re) { return re.test(rel); });
+}
+
+// Split findStaleVersions() output into { blocking, research }.
+function classifyStale(hits) {
+  const blocking = [], research = [];
+  for (const h of hits) (isResearchArtifact(h.file) ? research : blocking).push(h);
+  return { blocking: blocking, research: research };
+}
+
 function findStaleVersions(oldVersion) {
   if (!oldVersion) return [];
   const pats = currencyClaimPatterns(oldVersion);
@@ -480,6 +503,8 @@ module.exports = {
   writeVersion,
   bumpVersion,
   findStaleVersions,
+  classifyStale,
+  isResearchArtifact,
   mergedPrForBranch,
   prMergeState,
   waitForMergeState,
