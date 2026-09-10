@@ -3,7 +3,7 @@
 Shared vocabulary for the docs, the code and the API. Where a term here has a precise
 meaning, it is used that way everywhere — identifiers, comments, metadata keys.
 
-Current for **spab 0.5.1, wire format v2**. Terms that describe a *target* design
+Current for **spab 0.5.2, wire format v2**. Terms that describe a *target* design
 rather than shipping behaviour are marked **(planned)**, because the previous version
 of this file quietly described a frame that had been retired two formats earlier.
 

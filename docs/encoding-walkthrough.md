@@ -1,6 +1,6 @@
 # How spab encodes a secret: a worked example
 
-Status: 2026-09-07, against `src/js/spab.js` v0.5.1.
+Status: 2026-09-09, against `src/js/spab.js` v0.5.2.
 
 Every number in this document was produced by `r_and_d/walkthrough.js`. Run it to
 regenerate them:
