@@ -124,6 +124,64 @@ if (c.tryQuiet('git rev-parse -q --verify refs/tags/v' + next) !== null) {
 }
 c.ok('v' + next + ' is unused');
 
+// Every version surface the tooling does NOT write.
+//
+// writeVersion() updates three files; the repo contains more. v0.5.2 failed at
+// the gates because src/js/README.md carries a version string inside a
+// SPAB.version() example that tests/wire.test.js asserts against.
+//
+// Not all stale surfaces are equal, though. Research reports under
+// r_and_d/reports/ and pages/data/ are benchmark output for spab DEVELOPMENT --
+// no CI job asserts on them, and regenerating costs ~15 minutes. They must not
+// block a release; they are offered instead.
+const VERSION_DECL = /(\bVERSION\s*=|"version"\s*:)/;
+const OWNED = ['package.json', 'src/js/package.json', 'src/js/spab.js'];
+const staleAll = c.findStaleVersions(current).filter(function (h) {
+  return !(OWNED.indexOf(h.file) !== -1 && VERSION_DECL.test(h.text));
+});
+const split = c.classifyStale(staleAll);
+
+if (split.blocking.length) {
+  console.log('');
+  console.log('  ' + split.blocking.length + ' release-critical file(s) still claim to be ' + current + ':');
+  for (const h of split.blocking) console.log('    ' + h.file + ':' + h.line + '  ' + h.text);
+  console.log('');
+  c.fail(
+    'Version surfaces left behind.\n' +
+    '  These are currency claims, not history -- each says it describes the CURRENT\n' +
+    '  release while naming ' + current + '. Update them to ' + next + ' and re-run.'
+  );
+}
+c.ok('no release-critical file still claims to be ' + current);
+
+if (split.research.length) {
+  console.log('');
+  console.log('  ' + split.research.length + ' research artifact(s) still stamped ' + current + ':');
+  const seen = {};
+  for (const h of split.research) {
+    if (seen[h.file]) continue;
+    seen[h.file] = 1;
+    console.log('    ' + h.file);
+  }
+  console.log('');
+  console.log('  These are development benchmarks, not release gates -- nothing in CI');
+  console.log('  asserts on them, and the release ships either way.');
+  console.log('');
+  const regen = (!DRY_RUN && argv.indexOf('--yes') === -1)
+    ? c.askYesNo('  Run full research report updates now? (~15 min) (y/n) ')
+    : false;
+  if (DRY_RUN) c.skipped('prompt: run full research report updates? (~15 min)');
+  if (regen) {
+    c.run('npm run benchmark');
+    c.run('npm run capacity');
+    c.run('npm run comparisons');
+    c.ok('research reports regenerated');
+  } else {
+    c.skipped('research report regeneration -- reports still say ' + current);
+    console.log('    Refresh later with: npm run benchmark && npm run capacity && npm run comparisons');
+  }
+}
+
 // ── 3. Confirm ──────────────────────────────────────────────────────────
 
 c.step('3. Confirm');
@@ -163,59 +221,6 @@ c.run('git checkout -b ' + branchName);
 
 c.writeVersion(next);
 c.ok('version written to all three surfaces');
-
-// Every version surface the tooling does NOT write.
-//
-// writeVersion() updates three files; the repo contains more. v0.5.2 failed at
-// the gates because src/js/README.md carries a version string inside a
-// SPAB.version() example that tests/wire.test.js asserts against.
-//
-// Not all stale surfaces are equal, though. Research reports under
-// r_and_d/reports/ and pages/data/ are benchmark output for spab DEVELOPMENT --
-// no CI job asserts on them, and regenerating costs ~15 minutes. They must not
-// block a release; they are offered instead.
-const staleAll = c.findStaleVersions(current);
-const split = c.classifyStale(staleAll);
-
-if (split.blocking.length) {
-  console.log('');
-  console.log('  ' + split.blocking.length + ' release-critical file(s) still claim to be ' + current + ':');
-  for (const h of split.blocking) console.log('    ' + h.file + ':' + h.line + '  ' + h.text);
-  console.log('');
-  c.fail(
-    'Version surfaces left behind.\n' +
-    '  These are currency claims, not history -- each says it describes the CURRENT\n' +
-    '  release while naming ' + current + '. Update them to ' + next + ' and re-run.'
-  );
-}
-c.ok('no release-critical file still claims to be ' + current);
-
-if (split.research.length) {
-  console.log('');
-  console.log('  ' + split.research.length + ' research artifact(s) still stamped ' + current + ':');
-  const seen = {};
-  for (const h of split.research) {
-    if (seen[h.file]) continue;
-    seen[h.file] = 1;
-    console.log('    ' + h.file);
-  }
-  console.log('');
-  console.log('  These are development benchmarks, not release gates -- nothing in CI');
-  console.log('  asserts on them, and the release ships either way.');
-  console.log('');
-  const regen = (!DRY_RUN && argv.indexOf('--yes') === -1)
-    ? c.askYesNo('  Run full research report updates now? (~15 min) (y/n) ')
-    : false;
-  if (regen) {
-    c.run('npm run benchmark');
-    c.run('npm run capacity');
-    c.run('npm run comparisons');
-    c.ok('research reports regenerated');
-  } else {
-    c.skipped('research report regeneration -- reports still say ' + current);
-    console.log('    Refresh later with: npm run benchmark && npm run capacity && npm run comparisons');
-  }
-}
 
 c.promoteUnreleased(next, dateStr);
 c.ok('CHANGELOG [Unreleased] promoted to [' + next + '] — ' + dateStr);
