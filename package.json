@@ -1,7 +1,7 @@
 {
   "name": "spab-workspace",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "spab — watermark plain text. Monorepo root (reference JS lib in src/js, research in r_and_d).",
   "license": "BSD-2-Clause",
   "author": "M. A. Chatterjee (deftio)",

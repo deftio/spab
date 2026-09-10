@@ -1933,7 +1933,7 @@
   }
 
   // ---------- version / algorithm descriptor ----------
-  var VERSION = '0.5.1';
+  var VERSION = '0.5.2';
   var algorithm = {
     version: VERSION,
     name: 'plugsym-rep+rlnc',

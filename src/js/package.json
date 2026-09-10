@@ -1,6 +1,6 @@
 {
   "name": "@deftio/spab",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Watermark plain text \u2014 hide an arbitrary payload in the whitespace and punctuation of ordinary text, protected by error correction. Zero dependencies.",
   "type": "commonjs",
   "main": "spab.js",
